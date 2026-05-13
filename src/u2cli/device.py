@@ -3,11 +3,35 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import sys
 from typing import Optional
 
 import click
 import uiautomator2 as u2
+
+
+_DEVICE_CACHE: dict[str, u2.Device] = {}
+_LOGGER = logging.getLogger("u2cli.device")
+
+
+def _cache_key(serial: Optional[str]) -> str:
+    return serial or "__default__"
+
+
+def _resolve_serial(serial: Optional[str]) -> Optional[str]:
+    if serial is not None:
+        return serial
+
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and isinstance(ctx.obj, dict):
+        return ctx.obj.get("serial")
+    return None
+
+
+def clear_cached_device(serial: Optional[str] = None) -> None:
+    _DEVICE_CACHE.pop(_cache_key(serial), None)
 
 
 def connect_device(serial: Optional[str] = None) -> u2.Device:
@@ -16,19 +40,37 @@ def connect_device(serial: Optional[str] = None) -> u2.Device:
     *serial* takes priority. If not given, falls back to the serial stored in
     the current Click context object (set by the top-level ``cli`` group).
     """
-    if serial is None:
-        ctx = click.get_current_context(silent=True)
-        if ctx is not None and isinstance(ctx.obj, dict):
-            serial = ctx.obj.get("serial")
-    try:
-        if serial:
-            d = u2.connect(serial)
-        else:
-            d = u2.connect()
-        return d
-    except Exception as e:
-        click.echo(json.dumps({"error": str(e), "type": type(e).__name__}, ensure_ascii=False), err=True)
-        sys.exit(1)
+    serial = _resolve_serial(serial)
+
+    cached = _DEVICE_CACHE.get(_cache_key(serial))
+    if cached is not None:
+        _LOGGER.info("use cached device serial=%r", serial)
+        return cached
+
+    # Daemon mode retries once to handle transient ADB/transport hiccups.
+    max_attempts = 2 if os.getenv("U2CLI_IN_DAEMON") == "1" else 1
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            _LOGGER.info("connect attempt=%s/%s serial=%r", attempt, max_attempts, serial)
+            if serial:
+                d = u2.connect(serial)
+            else:
+                d = u2.connect()
+            _DEVICE_CACHE[_cache_key(serial)] = d
+            _LOGGER.info("connect success serial=%r", serial)
+            return d
+        except Exception as e:
+            last_error = e
+            _LOGGER.warning("connect failed attempt=%s serial=%r error=%s", attempt, serial, e)
+            clear_cached_device(serial)
+
+    click.echo(
+        json.dumps({"error": str(last_error), "type": type(last_error).__name__}, ensure_ascii=False),
+        err=True,
+    )
+    sys.exit(1)
 
 
 def build_selector_repr(kwargs: dict) -> str:

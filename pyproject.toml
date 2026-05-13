@@ -1,6 +1,6 @@
 [project]
 name = "uiautomator2-cli"
-version = "0.1.2"
+version = "0.2.0"
 requires-python = ">=3.8"
 dependencies = [
     "click>=8.0",

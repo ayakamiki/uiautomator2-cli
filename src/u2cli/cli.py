@@ -13,9 +13,12 @@ Command groups:
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 
 import click
+
+from u2cli.daemon import daemon_status, read_log_tail, run_via_daemon, should_delegate_command, start_daemon, stop_daemon
 
 # Element commands
 from u2cli.element import (
@@ -103,6 +106,123 @@ def cli(ctx, serial, output_json):
     ctx.obj["serial"] = serial
     ctx.obj["output_json"] = output_json
 
+    if should_delegate_command(invoked_subcommand=ctx.invoked_subcommand):
+        exit_code = run_via_daemon(serial=serial, argv=sys.argv[1:])
+        ctx.exit(exit_code)
+
+
+@click.command("repl")
+@click.pass_context
+def cmd_repl(ctx):
+    """Run interactive u2cli commands without reconnecting each time.
+
+    Type commands exactly like normal u2cli subcommands, for example:
+      click --text Settings
+      get-text --resource-id com.android.settings:id/title
+
+    Type "exit" or "quit" to leave.
+    """
+    click.echo('u2cli repl started. Type "exit" or "quit" to leave.')
+    while True:
+        try:
+            line = input("u2cli> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            click.echo()
+            break
+
+        if not line:
+            continue
+        if line in {"exit", "quit"}:
+            break
+
+        try:
+            args = shlex.split(line)
+        except ValueError as e:
+            click.echo(f"Parse error: {e}")
+            continue
+
+        if not args:
+            continue
+        if args[0] == "repl":
+            click.echo("Nested repl is not supported.")
+            continue
+
+        try:
+            cli.main(args=args, standalone_mode=False, obj=ctx.obj)
+        except click.exceptions.Exit:
+            pass
+        except click.ClickException as e:
+            click.echo(json.dumps({"error": e.format_message(), "type": type(e).__name__}, ensure_ascii=False), err=True)
+        except Exception as e:
+            click.echo(json.dumps({"error": str(e), "type": type(e).__name__}, ensure_ascii=False), err=True)
+
+
+@click.group("daemon")
+def daemon_group():
+    """Manage the background u2cli daemon process."""
+
+
+@daemon_group.command("start")
+@click.option(
+    "--full-output-log/--no-full-output-log",
+    "full_output_log",
+    default=None,
+    help="Write full command stdout/stderr into daemon log file",
+)
+@click.pass_context
+def cmd_daemon_start(ctx, full_output_log):
+    """Start daemon for current device serial."""
+    ok, message = start_daemon(ctx.obj.get("serial"), full_output_log=full_output_log)
+    if ctx.obj.get("output_json"):
+        click.echo(json.dumps({"ok": ok, "message": message}, ensure_ascii=False))
+    else:
+        click.echo(message)
+    if not ok:
+        raise click.ClickException(message)
+
+
+@daemon_group.command("stop")
+@click.pass_context
+def cmd_daemon_stop(ctx):
+    """Stop daemon for current device serial."""
+    ok, message = stop_daemon(ctx.obj.get("serial"))
+    if ctx.obj.get("output_json"):
+        click.echo(json.dumps({"ok": ok, "message": message}, ensure_ascii=False))
+    else:
+        click.echo(message)
+    if not ok:
+        raise click.ClickException(message)
+
+
+@daemon_group.command("status")
+@click.pass_context
+def cmd_daemon_status(ctx):
+    """Show daemon status for current device serial."""
+    status = daemon_status(ctx.obj.get("serial"))
+    if ctx.obj.get("output_json"):
+        click.echo(json.dumps(status, ensure_ascii=False))
+        return
+
+    click.echo(f"running: {status.get('running')}")
+    click.echo(f"socket: {status.get('socket')}")
+    click.echo(f"pid_file: {status.get('pid_file')}")
+    click.echo(f"log_file: {status.get('log_file')}")
+    click.echo(f"full_output_log: {status.get('full_output_log', False)}")
+    if "pid" in status:
+        click.echo(f"pid: {status['pid']}")
+
+
+@daemon_group.command("logs")
+@click.option("--lines", default=200, type=int, help="Number of latest log lines")
+@click.pass_context
+def cmd_daemon_logs(ctx, lines):
+    """Show daemon log tail for current device serial."""
+    text = read_log_tail(ctx.obj.get("serial"), lines=lines)
+    if not text:
+        click.echo("No log entries yet.")
+        return
+    click.echo(text, nl=False)
+
 
 # ---------------------------------------------------------------------------
 # Element commands (top-level — most common operations)
@@ -163,6 +283,8 @@ cli.add_command(cmd_app_info, name="app-info")
 cli.add_command(cmd_app_list, name="app-list")
 cli.add_command(cmd_app_list_running, name="app-list-running")
 cli.add_command(cmd_app_wait, name="app-wait")
+cli.add_command(cmd_repl, name="repl")
+cli.add_command(daemon_group, name="daemon")
 
 
 def main():
