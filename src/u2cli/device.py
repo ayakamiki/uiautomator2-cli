@@ -8,11 +8,13 @@ import os
 import sys
 from typing import Optional
 
+import adbutils
 import click
 import uiautomator2 as u2
 
 
 _DEVICE_CACHE: dict[str, u2.Device] = {}
+_DEFAULT_DEVICE_SERIAL: Optional[str] = None
 _LOGGER = logging.getLogger("u2cli.device")
 
 
@@ -31,7 +33,28 @@ def _resolve_serial(serial: Optional[str]) -> Optional[str]:
 
 
 def clear_cached_device(serial: Optional[str] = None) -> None:
+    global _DEFAULT_DEVICE_SERIAL
+
+    if serial is None:
+        if _DEFAULT_DEVICE_SERIAL is not None:
+            _LOGGER.info("clear sticky default device device_id=%r", _DEFAULT_DEVICE_SERIAL)
+        _DEFAULT_DEVICE_SERIAL = None
+        _DEVICE_CACHE.pop(_cache_key(None), None)
+        return
+
     _DEVICE_CACHE.pop(_cache_key(serial), None)
+    if _DEFAULT_DEVICE_SERIAL == serial:
+        _LOGGER.info("clear sticky default device device_id=%r", _DEFAULT_DEVICE_SERIAL)
+        _DEFAULT_DEVICE_SERIAL = None
+        _DEVICE_CACHE.pop(_cache_key(None), None)
+
+
+def _current_unique_serial() -> str:
+    return adbutils.adb.device().serial
+
+
+def default_device_serial() -> Optional[str]:
+    return _DEFAULT_DEVICE_SERIAL
 
 
 def connect_device(serial: Optional[str] = None) -> u2.Device:
@@ -40,31 +63,70 @@ def connect_device(serial: Optional[str] = None) -> u2.Device:
     *serial* takes priority. If not given, falls back to the serial stored in
     the current Click context object (set by the top-level ``cli`` group).
     """
-    serial = _resolve_serial(serial)
+    global _DEFAULT_DEVICE_SERIAL
 
-    cached = _DEVICE_CACHE.get(_cache_key(serial))
-    if cached is not None:
-        _LOGGER.info("use cached device serial=%r", serial)
-        return cached
+    requested_serial = _resolve_serial(serial)
+    cache_serial = requested_serial
 
     # Daemon mode retries once to handle transient ADB/transport hiccups.
     max_attempts = 2 if os.getenv("U2CLI_IN_DAEMON") == "1" else 1
     last_error: Optional[Exception] = None
 
     for attempt in range(1, max_attempts + 1):
+        selected_serial = requested_serial
         try:
-            _LOGGER.info("connect attempt=%s/%s serial=%r", attempt, max_attempts, serial)
-            if serial:
-                d = u2.connect(serial)
+            if selected_serial is None:
+                if _DEFAULT_DEVICE_SERIAL is None:
+                    _DEFAULT_DEVICE_SERIAL = _current_unique_serial()
+                    _LOGGER.info("bind sticky default device device_id=%r", _DEFAULT_DEVICE_SERIAL)
+                selected_serial = _DEFAULT_DEVICE_SERIAL
+                cache_serial = None
+
+            cached = _DEVICE_CACHE.get(_cache_key(cache_serial))
+            if cached is not None:
+                _LOGGER.info(
+                    "use cached device device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                    selected_serial,
+                    requested_serial,
+                    selected_serial,
+                    cache_serial,
+                )
+                return cached
+
+            _LOGGER.info(
+                "connect attempt=%s/%s device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                attempt,
+                max_attempts,
+                selected_serial,
+                requested_serial,
+                selected_serial,
+                cache_serial,
+            )
+            if selected_serial:
+                d = u2.connect(selected_serial)
             else:
                 d = u2.connect()
-            _DEVICE_CACHE[_cache_key(serial)] = d
-            _LOGGER.info("connect success serial=%r", serial)
+            _DEVICE_CACHE[_cache_key(cache_serial)] = d
+            _LOGGER.info(
+                "connect success device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                selected_serial,
+                requested_serial,
+                selected_serial,
+                cache_serial,
+            )
             return d
         except Exception as e:
             last_error = e
-            _LOGGER.warning("connect failed attempt=%s serial=%r error=%s", attempt, serial, e)
-            clear_cached_device(serial)
+            _LOGGER.warning(
+                "connect failed attempt=%s device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r error=%s",
+                attempt,
+                selected_serial,
+                requested_serial,
+                selected_serial,
+                cache_serial,
+                e,
+            )
+            clear_cached_device(cache_serial)
 
     click.echo(
         json.dumps({"error": str(last_error), "type": type(last_error).__name__}, ensure_ascii=False),

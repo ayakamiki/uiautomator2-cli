@@ -1,8 +1,9 @@
 [project]
 name = "uiautomator2-cli"
-version = "0.2.0"
+version = "0.2.1"
 requires-python = ">=3.8"
 dependencies = [
+    "adbutils>=2.9.4",
     "click>=8.0",
     "uiautomator2>=3.5.0",
 ]

@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -27,6 +28,12 @@ import click
 ENV_IN_DAEMON = "U2CLI_IN_DAEMON"
 ENV_DAEMON_LOG_FILE = "U2CLI_DAEMON_LOG_FILE"
 ENV_DAEMON_LOG_FULL_OUTPUT = "U2CLI_DAEMON_LOG_FULL_OUTPUT"
+_DEFAULT_DEVICE_MISSING_PATTERNS = (
+    re.compile(r"device\s+'.+?'\s+not\s+found", re.IGNORECASE),
+    re.compile(r"device\s+.+?\s+not\s+found", re.IGNORECASE),
+    re.compile(r"no\s+device", re.IGNORECASE),
+    re.compile(r"transport.*not\s+found", re.IGNORECASE),
+)
 
 
 def _env_true(name: str) -> bool:
@@ -95,6 +102,92 @@ def read_log_tail(serial: Optional[str], lines: int = 200) -> str:
     if lines <= 0:
         return ""
     return "".join(content[-lines:])
+
+
+def _active_device_id(serial: Optional[str]) -> Optional[str]:
+    if serial is not None:
+        return serial
+
+    from u2cli.device import default_device_serial
+
+    return default_device_serial()
+
+
+def _run_cli_once(serial: Optional[str], argv: list[str]) -> tuple[int, str, str, Optional[BaseException]]:
+    stdout_io = io.StringIO()
+    stderr_io = io.StringIO()
+    exit_code = 0
+    run_error: Optional[BaseException] = None
+
+    with contextlib.redirect_stdout(stdout_io), contextlib.redirect_stderr(stderr_io):
+        try:
+            # Lazy import avoids circular import at module load time.
+            from u2cli.cli import cli
+
+            cli.main(
+                args=argv,
+                standalone_mode=False,
+                obj={"serial": serial, "output_json": False},
+            )
+        except click.exceptions.Exit as e:
+            exit_code = int(e.exit_code or 0)
+            run_error = e
+        except click.ClickException as e:
+            click.echo(
+                json.dumps({"error": e.format_message(), "type": type(e).__name__}, ensure_ascii=False),
+                err=True,
+            )
+            exit_code = int(e.exit_code)
+            run_error = e
+        except SystemExit as e:
+            run_error = e
+            if isinstance(e.code, int):
+                exit_code = e.code
+            else:
+                exit_code = 1
+        except Exception as e:
+            run_error = e
+            click.echo(json.dumps({"error": str(e), "type": type(e).__name__}, ensure_ascii=False), err=True)
+            exit_code = 1
+
+    return exit_code, stdout_io.getvalue(), stderr_io.getvalue(), run_error
+
+
+def _looks_like_missing_default_device(
+    error: Optional[BaseException],
+    stderr_value: str,
+    bound_serial: Optional[str],
+) -> bool:
+    if not bound_serial:
+        return False
+
+    text = "\n".join(part for part in [str(error or ""), stderr_value] if part).lower()
+    if bound_serial.lower() in text and "not found" in text:
+        return True
+    return any(pattern.search(text) for pattern in _DEFAULT_DEVICE_MISSING_PATTERNS)
+
+
+def _run_cli_with_default_retry(
+    serial: Optional[str],
+    argv: list[str],
+    logger: logging.Logger,
+) -> tuple[int, str, str]:
+    from u2cli.device import clear_cached_device, default_device_serial
+
+    bound_default_serial = default_device_serial() if serial is None else None
+    exit_code, stdout_value, stderr_value, run_error = _run_cli_once(serial, argv)
+
+    if (
+        serial is None
+        and bound_default_serial
+        and exit_code != 0
+        and _looks_like_missing_default_device(run_error, stderr_value, bound_default_serial)
+    ):
+        logger.info("default device missing, clear sticky binding and retry once device_id=%r", bound_default_serial)
+        clear_cached_device()
+        exit_code, stdout_value, stderr_value, _ = _run_cli_once(serial, argv)
+
+    return exit_code, stdout_value, stderr_value
 
 
 def _recv_json(conn: socket.socket) -> Dict[str, Any]:
@@ -171,8 +264,9 @@ def serve(serial: Optional[str]) -> None:
             f.write(str(os.getpid()))
 
         logger.info(
-            "daemon started serial=%r socket=%s pid_file=%s full_output_logging=%s",
+            "daemon started serial=%r device_id=%r socket=%s pid_file=%s full_output_logging=%s",
             serial,
+            _active_device_id(serial),
             sock_file,
             pid_file,
             full_output_logging,
@@ -188,7 +282,7 @@ def serve(serial: Optional[str]) -> None:
                 try:
                     req = _recv_json(conn)
                     action = req.get("action")
-                    logger.info("request action=%s", action)
+                    logger.info("request action=%s device_id=%r", action, _active_device_id(serial))
                     if action == "ping":
                         _send_json(
                             conn,
@@ -200,54 +294,27 @@ def serve(serial: Optional[str]) -> None:
                         )
                         continue
                     if action == "stop":
-                        logger.info("request stop received")
+                        logger.info("request stop received device_id=%r", _active_device_id(serial))
                         _send_json(conn, {"ok": True})
                         stop_flag["stop"] = True
                         continue
                     if action != "run":
-                        logger.warning("unknown action=%r", action)
+                        logger.warning("unknown action=%r device_id=%r", action, _active_device_id(serial))
                         _send_json(conn, {"ok": False, "error": "unknown action", "exit_code": 1})
                         continue
 
                     argv = req.get("argv") or []
-                    logger.info("run start argv=%s", json.dumps(argv, ensure_ascii=False))
-                    stdout_io = io.StringIO()
-                    stderr_io = io.StringIO()
-                    exit_code = 0
-                    started_at = time.time()
-
-                    with contextlib.redirect_stdout(stdout_io), contextlib.redirect_stderr(stderr_io):
-                        try:
-                            # Lazy import avoids circular import at module load time.
-                            from u2cli.cli import cli
-
-                            cli.main(
-                                args=argv,
-                                standalone_mode=False,
-                                obj={"serial": serial, "output_json": False},
-                            )
-                        except click.exceptions.Exit as e:
-                            exit_code = int(e.exit_code or 0)
-                        except click.ClickException as e:
-                            click.echo(
-                                json.dumps({"error": e.format_message(), "type": type(e).__name__}, ensure_ascii=False),
-                                err=True,
-                            )
-                            exit_code = int(e.exit_code)
-                        except SystemExit as e:
-                            if isinstance(e.code, int):
-                                exit_code = e.code
-                            else:
-                                exit_code = 1
-                        except Exception as e:
-                            click.echo(json.dumps({"error": str(e), "type": type(e).__name__}, ensure_ascii=False), err=True)
-                            exit_code = 1
-
-                    duration_ms = int((time.time() - started_at) * 1000)
-                    stdout_value = stdout_io.getvalue()
-                    stderr_value = stderr_io.getvalue()
                     logger.info(
-                        "run end exit_code=%s duration_ms=%s stdout_bytes=%s stderr_bytes=%s",
+                        "run start device_id=%r argv=%s",
+                        _active_device_id(serial),
+                        json.dumps(argv, ensure_ascii=False),
+                    )
+                    started_at = time.time()
+                    exit_code, stdout_value, stderr_value = _run_cli_with_default_retry(serial, argv, logger)
+                    duration_ms = int((time.time() - started_at) * 1000)
+                    logger.info(
+                        "run end device_id=%r exit_code=%s duration_ms=%s stdout_bytes=%s stderr_bytes=%s",
+                        _active_device_id(serial),
                         exit_code,
                         duration_ms,
                         len(stdout_value.encode("utf-8", errors="replace")),
@@ -270,10 +337,10 @@ def serve(serial: Optional[str]) -> None:
                         },
                     )
                 except Exception as e:
-                    logger.exception("request handling failed: %s", e)
+                    logger.exception("request handling failed device_id=%r error=%s", _active_device_id(serial), e)
                     _send_json(conn, {"ok": False, "error": str(e), "exit_code": 1})
     finally:
-        logger.info("daemon stopping serial=%r", serial)
+        logger.info("daemon stopping serial=%r device_id=%r", serial, _active_device_id(serial))
         server.close()
         _remove_file(sock_file)
         _remove_file(pid_file)
