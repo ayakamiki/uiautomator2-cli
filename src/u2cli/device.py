@@ -6,20 +6,24 @@ import json
 import logging
 import os
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import adbutils
 import click
 import uiautomator2 as u2
 
+from u2cli.backends.base import AutomationBackend
+from u2cli.backends.factory import create_backend, resolve_platform
+from u2cli.transports.hdc import connect_harmony_driver, resolve_default_target
 
-_DEVICE_CACHE: dict[str, u2.Device] = {}
+
+_DEVICE_CACHE: dict[str, AutomationBackend] = {}
 _DEFAULT_DEVICE_SERIAL: Optional[str] = None
 _LOGGER = logging.getLogger("u2cli.device")
 
 
-def _cache_key(serial: Optional[str]) -> str:
-    return serial or "__default__"
+def _cache_key(platform: str, serial: Optional[str]) -> str:
+    return f"{platform}:{serial or '__default__'}"
 
 
 def _resolve_serial(serial: Optional[str]) -> Optional[str]:
@@ -32,33 +36,70 @@ def _resolve_serial(serial: Optional[str]) -> Optional[str]:
     return None
 
 
-def clear_cached_device(serial: Optional[str] = None) -> None:
+def _resolve_platform(platform: Optional[str]) -> Optional[str]:
+    if platform is not None:
+        return platform
+
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and isinstance(ctx.obj, dict):
+        return ctx.obj.get("platform")
+    return None
+
+
+def clear_cached_device(serial: Optional[str] = None, platform: Optional[str] = None) -> None:
     global _DEFAULT_DEVICE_SERIAL
+
+    resolved_platform = resolve_platform(_resolve_platform(platform))
 
     if serial is None:
         if _DEFAULT_DEVICE_SERIAL is not None:
             _LOGGER.info("clear sticky default device device_id=%r", _DEFAULT_DEVICE_SERIAL)
-        _DEFAULT_DEVICE_SERIAL = None
-        _DEVICE_CACHE.pop(_cache_key(None), None)
+        if resolved_platform == "android":
+            _DEFAULT_DEVICE_SERIAL = None
+        _DEVICE_CACHE.pop(_cache_key(resolved_platform, None), None)
         return
 
-    _DEVICE_CACHE.pop(_cache_key(serial), None)
-    if _DEFAULT_DEVICE_SERIAL == serial:
+    _DEVICE_CACHE.pop(_cache_key(resolved_platform, serial), None)
+    if resolved_platform == "android" and _DEFAULT_DEVICE_SERIAL == serial:
         _LOGGER.info("clear sticky default device device_id=%r", _DEFAULT_DEVICE_SERIAL)
         _DEFAULT_DEVICE_SERIAL = None
-        _DEVICE_CACHE.pop(_cache_key(None), None)
+        _DEVICE_CACHE.pop(_cache_key(resolved_platform, None), None)
 
 
-def _current_unique_serial() -> str:
-    return adbutils.adb.device().serial
+def _current_unique_serial(platform: str = "android") -> str:
+    if platform == "android":
+        return adbutils.adb.device().serial
+    if platform == "harmony":
+        return resolve_default_target()
+    raise ValueError(f"unsupported platform: {platform}")
 
 
-def default_device_serial() -> Optional[str]:
+def _connect_raw_device(platform: str, serial: Optional[str]) -> Any:
+    if platform == "android":
+        if serial:
+            return u2.connect(serial)
+        return u2.connect()
+    if platform == "harmony":
+        return connect_harmony_driver(serial)
+    raise ValueError(f"unsupported platform: {platform}")
+
+
+def default_device_serial(platform: Optional[str] = None) -> Optional[str]:
+    resolved_platform = resolve_platform(_resolve_platform(platform))
+    if resolved_platform != "android":
+        return None
     return _DEFAULT_DEVICE_SERIAL
 
 
-def connect_device(serial: Optional[str] = None) -> u2.Device:
-    """Connect to a device.
+def has_cached_backend(serial: Optional[str] = None, platform: Optional[str] = None) -> bool:
+    resolved_platform = resolve_platform(_resolve_platform(platform))
+    requested_serial = _resolve_serial(serial)
+    cache_serial = requested_serial
+    return _cache_key(resolved_platform, cache_serial) in _DEVICE_CACHE
+
+
+def connect_backend(serial: Optional[str] = None, platform: Optional[str] = None) -> AutomationBackend:
+    """Connect to a backend-aware device wrapper.
 
     *serial* takes priority. If not given, falls back to the serial stored in
     the current Click context object (set by the top-level ``cli`` group).
@@ -66,6 +107,7 @@ def connect_device(serial: Optional[str] = None) -> u2.Device:
     global _DEFAULT_DEVICE_SERIAL
 
     requested_serial = _resolve_serial(serial)
+    requested_platform = resolve_platform(_resolve_platform(platform))
     cache_serial = requested_serial
 
     # Daemon mode retries once to handle transient ADB/transport hiccups.
@@ -76,16 +118,19 @@ def connect_device(serial: Optional[str] = None) -> u2.Device:
         selected_serial = requested_serial
         try:
             if selected_serial is None:
-                if _DEFAULT_DEVICE_SERIAL is None:
-                    _DEFAULT_DEVICE_SERIAL = _current_unique_serial()
+                if requested_platform == "android" and _DEFAULT_DEVICE_SERIAL is None:
+                    _DEFAULT_DEVICE_SERIAL = _current_unique_serial("android")
                     _LOGGER.info("bind sticky default device device_id=%r", _DEFAULT_DEVICE_SERIAL)
                 selected_serial = _DEFAULT_DEVICE_SERIAL
                 cache_serial = None
+                if requested_platform == "harmony":
+                    selected_serial = _current_unique_serial("harmony")
 
-            cached = _DEVICE_CACHE.get(_cache_key(cache_serial))
+            cached = _DEVICE_CACHE.get(_cache_key(requested_platform, cache_serial))
             if cached is not None:
                 _LOGGER.info(
-                    "use cached device device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                    "use cached backend platform=%r device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                    requested_platform,
                     selected_serial,
                     requested_serial,
                     selected_serial,
@@ -94,45 +139,52 @@ def connect_device(serial: Optional[str] = None) -> u2.Device:
                 return cached
 
             _LOGGER.info(
-                "connect attempt=%s/%s device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                "connect attempt=%s/%s platform=%r device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
                 attempt,
                 max_attempts,
+                requested_platform,
                 selected_serial,
                 requested_serial,
                 selected_serial,
                 cache_serial,
             )
-            if selected_serial:
-                d = u2.connect(selected_serial)
-            else:
-                d = u2.connect()
-            _DEVICE_CACHE[_cache_key(cache_serial)] = d
+            d = _connect_raw_device(requested_platform, selected_serial)
+            backend = create_backend(requested_platform, serial=selected_serial, raw_device=d)
+            _DEVICE_CACHE[_cache_key(requested_platform, cache_serial)] = backend
             _LOGGER.info(
-                "connect success device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                "connect success platform=%r device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",
+                requested_platform,
                 selected_serial,
                 requested_serial,
                 selected_serial,
                 cache_serial,
             )
-            return d
+            return backend
         except Exception as e:
             last_error = e
             _LOGGER.warning(
-                "connect failed attempt=%s device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r error=%s",
+                "connect failed attempt=%s platform=%r device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r error=%s",
                 attempt,
+                requested_platform,
                 selected_serial,
                 requested_serial,
                 selected_serial,
                 cache_serial,
                 e,
             )
-            clear_cached_device(cache_serial)
+            clear_cached_device(cache_serial, platform=requested_platform)
 
     click.echo(
         json.dumps({"error": str(last_error), "type": type(last_error).__name__}, ensure_ascii=False),
         err=True,
     )
     sys.exit(1)
+
+
+def connect_device(serial: Optional[str] = None) -> Any:
+    """Connect to the wrapped raw device for compatibility with existing commands."""
+
+    return connect_backend(serial=serial).raw_device()
 
 
 def build_selector_repr(kwargs: dict) -> str:

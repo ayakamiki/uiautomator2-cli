@@ -8,12 +8,18 @@ dependencies = [
     "uiautomator2>=3.5.0",
 ]
 
+[project.optional-dependencies]
+harmony = [
+    "hmdriver2",
+]
+
 [[project.authors]]
 name = "lanbaoshen"
 email = "lanbaoshen@icloud.com"
 
 [project.scripts]
 u2cli = "u2cli.cli:main"
+u2cli-smoke = "u2cli.smoke:main"
 
 [build-system]
 requires = ["hatchling"]

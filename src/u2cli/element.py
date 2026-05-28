@@ -1,14 +1,15 @@
 """Element selector and action commands for u2cli.
 
-All commands that interact with UI elements via d(**selector).action().
-Each command outputs the corresponding uiautomator2 Python code.
+Commands in this module resolve a shared cross-platform selector surface and
+then perform actions on the matched element.
 """
 
 from __future__ import annotations
 
 import click
 
-from u2cli.device import build_selector_repr, connect_device, output_result
+from u2cli.device import build_selector_repr, connect_backend, output_result
+from u2cli.services import create_xpath_service
 
 # ---------------------------------------------------------------------------
 # Selector option helpers
@@ -19,11 +20,17 @@ SELECTOR_OPTIONS = [
     click.option("--text-contains", default=None, help="Text contains substring"),
     click.option("--text-matches", default=None, help="Text matches regex"),
     click.option("--text-starts-with", default=None, help="Text starts with prefix"),
-    click.option("--resource-id", default=None, help="Resource ID (e.g. com.pkg:id/btn)"),
+    click.option("--resource-id", default=None, help="Resource/element ID (e.g. com.pkg:id/btn)"),
     click.option("--class-name", default=None, help="UI class name"),
-    click.option("--description", default=None, help="Content description (exact)"),
-    click.option("--description-contains", default=None, help="Content description contains"),
-    click.option("--package", default=None, help="Package name"),
+    click.option("--description", default=None, help="Accessibility description (exact)"),
+    click.option("--description-contains", default=None, help="Accessibility description contains"),
+    click.option("--description-matches", default=None, help="Accessibility description matches regex"),
+    click.option("--description-starts-with", default=None, help="Accessibility description starts with prefix"),
+    click.option(
+        "--package",
+        default=None,
+        help="Package/bundle filter (Android package name; Harmony hierarchy bundle filter)",
+    ),
     click.option("--index", default=None, type=int, help="Sibling index"),
     click.option("--instance", default=None, type=int, help="Global instance index (0-based)"),
     click.option("--checkable", is_flag=True, default=None, help="Element is checkable"),
@@ -54,6 +61,8 @@ def build_selector_kwargs(**kwargs) -> dict:
         "class_name": "className",
         "description": "description",
         "description_contains": "descriptionContains",
+        "description_matches": "descriptionMatches",
+        "description_starts_with": "descriptionStartsWith",
         "package": "packageName",
         "index": "index",
         "instance": "instance",
@@ -90,8 +99,8 @@ def cmd_click(timeout, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).click(timeout={timeout})"
 
-    d = connect_device()
-    d(**sel).click(timeout=timeout)
+    backend = connect_backend()
+    backend.select(sel).click(timeout=timeout)
     output_result(None, u2_code)
 
 
@@ -108,8 +117,8 @@ def cmd_long_click(duration, timeout, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).long_click(duration={duration}, timeout={timeout})"
 
-    d = connect_device()
-    d(**sel).long_click(duration=duration, timeout=timeout)
+    backend = connect_backend()
+    backend.select(sel).long_click(duration=duration, timeout=timeout)
     output_result(None, u2_code)
 
 
@@ -125,8 +134,8 @@ def cmd_get_text(timeout, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).get_text(timeout={timeout})"
 
-    d = connect_device()
-    text = d(**sel).get_text(timeout=timeout)
+    backend = connect_backend()
+    text = backend.select(sel).get_text(timeout=timeout)
     output_result(text, u2_code)
 
 
@@ -143,8 +152,8 @@ def cmd_set_text(timeout, text, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).set_text({text!r}, timeout={timeout})"
 
-    d = connect_device()
-    d(**sel).set_text(text, timeout=timeout)
+    backend = connect_backend()
+    backend.select(sel).set_text(text, timeout=timeout)
     output_result(None, u2_code)
 
 
@@ -160,8 +169,8 @@ def cmd_clear_text(timeout, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).clear_text(timeout={timeout})"
 
-    d = connect_device()
-    d(**sel).clear_text(timeout=timeout)
+    backend = connect_backend()
+    backend.select(sel).clear_text(timeout=timeout)
     output_result(None, u2_code)
 
 
@@ -180,11 +189,8 @@ def cmd_exists(timeout, **kwargs):
     else:
         u2_code = f"d({sel_repr}).exists"
 
-    d = connect_device()
-    if timeout:
-        exists = d(**sel).exists(timeout=timeout)
-    else:
-        exists = d(**sel).exists
+    backend = connect_backend()
+    exists = backend.select(sel).exists(timeout=timeout)
     output_result(bool(exists), u2_code)
 
 
@@ -209,11 +215,8 @@ def cmd_wait(timeout, gone, **kwargs):
     else:
         u2_code = f"d({sel_repr}).wait(timeout={timeout})"
 
-    d = connect_device()
-    if gone:
-        result = d(**sel).wait_gone(timeout=timeout)
-    else:
-        result = d(**sel).wait(timeout=timeout)
+    backend = connect_backend()
+    result = backend.select(sel).wait(timeout=timeout, gone=gone)
     output_result(result, u2_code)
 
 
@@ -229,8 +232,8 @@ def cmd_element_info(timeout, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).info"
 
-    d = connect_device()
-    info = d(**sel).info
+    backend = connect_backend()
+    info = backend.select(sel).info()
     output_result(info, u2_code)
 
 
@@ -252,8 +255,8 @@ def cmd_swipe_element(direction, steps, **kwargs):
     sel_repr = build_selector_repr(sel)
     u2_code = f"d({sel_repr}).swipe({direction!r}, steps={steps})"
 
-    d = connect_device()
-    d(**sel).swipe(direction, steps=steps)
+    backend = connect_backend()
+    backend.select(sel).swipe(direction, steps=steps)
     output_result(None, u2_code)
 
 
@@ -284,61 +287,62 @@ def cmd_scroll(direction, action, max_swipes, to_text, **kwargs):
         raise click.UsageError("At least one selector option is required.")
 
     sel_repr = build_selector_repr(sel)
-    el = connect_device()(**sel)
+    backend = connect_backend()
 
     if to_text:
         u2_code = f"d({sel_repr}).scroll.{direction}.to(text={to_text!r})"
-        getattr(el.scroll, direction).to(text=to_text)
+        backend.select(sel).scroll(direction=direction, action=action, to_text=to_text)
     elif max_swipes is not None:
         u2_code = f"d({sel_repr}).scroll.{direction}.{action}(max_swipes={max_swipes})"
-        getattr(getattr(el.scroll, direction), action)(max_swipes=max_swipes)
+        backend.select(sel).scroll(direction=direction, action=action, max_swipes=max_swipes)
     else:
         u2_code = f"d({sel_repr}).scroll.{direction}.{action}()"
-        getattr(getattr(el.scroll, direction), action)()
+        backend.select(sel).scroll(direction=direction, action=action)
 
     output_result(None, u2_code)
 
 
 @click.command("xpath-click")
 @click.option("--timeout", default=3.0, type=float, help="Wait timeout in seconds")
-@click.argument("xpath")
+@click.argument("xpath", metavar="LOCATOR")
 def cmd_xpath_click(timeout, xpath):
-    """Click on an element found by XPath expression.
+    """Click on an element resolved from a locator expression.
 
-    Supports shorthand: @resource-id, ^regex, %contains%, plain text.
+    Supports full XPath plus shorthand forms such as @id, ^regex,
+    %contains%, prefix%, %suffix, and plain text.
     """
     u2_code = f"d.xpath({xpath!r}).click(timeout={timeout})"
-    d = connect_device()
-    d.xpath(xpath).click(timeout=timeout)
+    backend = connect_backend()
+    create_xpath_service(backend).click(xpath, timeout=timeout)
     output_result(None, u2_code)
 
 
 @click.command("xpath-get-text")
-@click.argument("xpath")
+@click.argument("xpath", metavar="LOCATOR")
 def cmd_xpath_get_text(xpath):
-    """Get text of an element found by XPath expression."""
+    """Get text from an element resolved from a locator expression."""
     u2_code = f"d.xpath({xpath!r}).get_text()"
-    d = connect_device()
-    text = d.xpath(xpath).get_text()
+    backend = connect_backend()
+    text = create_xpath_service(backend).get_text(xpath)
     output_result(text, u2_code)
 
 
 @click.command("xpath-exists")
-@click.argument("xpath")
+@click.argument("xpath", metavar="LOCATOR")
 def cmd_xpath_exists(xpath):
-    """Check if an element exists by XPath expression."""
+    """Check whether a locator expression resolves to an element."""
     u2_code = f"d.xpath({xpath!r}).exists"
-    d = connect_device()
-    exists = d.xpath(xpath).exists
+    backend = connect_backend()
+    exists = create_xpath_service(backend).exists(xpath)
     output_result(bool(exists), u2_code)
 
 
 @click.command("xpath-set-text")
-@click.argument("xpath")
+@click.argument("xpath", metavar="LOCATOR")
 @click.argument("text")
 def cmd_xpath_set_text(xpath, text):
-    """Set text on an element found by XPath expression."""
+    """Set text on an element resolved from a locator expression."""
     u2_code = f"d.xpath({xpath!r}).set_text({text!r})"
-    d = connect_device()
-    d.xpath(xpath).set_text(text)
+    backend = connect_backend()
+    create_xpath_service(backend).set_text(xpath, text)
     output_result(None, u2_code)

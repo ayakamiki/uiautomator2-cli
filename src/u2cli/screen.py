@@ -8,128 +8,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import xml.etree.ElementTree as ET
 
 import click
 
-from u2cli.device import connect_device, output_result
-
-
-# ---------------------------------------------------------------------------
-# UI hierarchy → compact text tree
-# ---------------------------------------------------------------------------
-
-_BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
-
-
-def _bounds_area(bounds_str: str) -> int:
-    m = _BOUNDS_RE.fullmatch(bounds_str)
-    if not m:
-        return 0
-    x1, y1, x2, y2 = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
-    return max(0, x2 - x1) * max(0, y2 - y1)
-
-
-def _short_class(cls: str) -> str:
-    """'android.widget.TextView' → 'TextView'"""
-    return cls.rpartition(".")[2] if cls else cls
-
-
-def _is_invisible(node: ET.Element) -> bool:
-    if node.get("displayed") == "false":
-        return True
-    bounds = node.get("bounds", "")
-    return bool(bounds) and _bounds_area(bounds) == 0
-
-
-def _has_content(node: ET.Element) -> bool:
-    return bool(
-        node.get("text", "").strip()
-        or node.get("content-desc", "").strip()
-        or node.get("resource-id", "").strip()
-    )
-
-
-def _is_interactive(node: ET.Element) -> bool:
-    return node.get("clickable") == "true" or node.get("scrollable") == "true"
-
-
-def _render_node(node: ET.Element, lines: list[str], depth: int) -> None:
-    """Recursively render *node* into *lines* as an indented text tree."""
-    if _is_invisible(node):
-        return
-
-    children = list(node)
-
-    # Collapse pure-container nodes with exactly one child
-    if (
-        node.tag != "hierarchy"
-        and not _has_content(node)
-        and not _is_interactive(node)
-        and len(children) == 1
-    ):
-        _render_node(children[0], lines, depth)
-        return
-
-    # Build the line for this node
-    parts: list[str] = []
-
-    cls = node.get("class", node.tag)
-    if cls and cls != "hierarchy":
-        parts.append(_short_class(cls))
-
-    text = node.get("text", "").strip()
-    if text:
-        parts.append(f'"{text}"')
-
-    desc = node.get("content-desc", "").strip()
-    if desc and desc != text:
-        parts.append(f'desc="{desc}"')
-
-    rid = node.get("resource-id", "").strip()
-    if rid:
-        parts.append(f"#{rid}")
-
-    bounds = node.get("bounds", "")
-    if bounds:
-        m = _BOUNDS_RE.fullmatch(bounds)
-        if m:
-            parts.append(f"[{m.group(1)},{m.group(2)},{m.group(3)},{m.group(4)}]")
-
-    flags = []
-    if node.get("clickable") == "true":
-        flags.append("click")
-    if node.get("scrollable") == "true":
-        flags.append("scroll")
-    if node.get("checked") == "true":
-        flags.append("checked")
-    if node.get("focused") == "true":
-        flags.append("focused")
-    if node.get("selected") == "true":
-        flags.append("selected")
-    if node.get("enabled") == "false":
-        flags.append("disabled")
-    if flags:
-        parts.append(" ".join(flags))
-
-    # Only emit a line if there's something to say (skip bare hierarchy root)
-    if parts:
-        lines.append("  " * depth + " ".join(parts))
-        child_depth = depth + 1
-    else:
-        child_depth = depth
-
-    for child in children:
-        _render_node(child, lines, child_depth)
-
-
-def _hierarchy_to_text(xml_str: str) -> str:
-    """Convert a uiautomator2 XML hierarchy to a compact indented text tree."""
-    root = ET.fromstring(xml_str)
-    lines: list[str] = []
-    _render_node(root, lines, 0)
-    return "\n".join(lines)
+from u2cli.backends.factory import resolve_platform
+from u2cli.backends.harmony_hm import run_harmony_media_control_if_available
+from u2cli.device import connect_backend, output_result
+from u2cli.services import create_hierarchy_service
 
 # ---------------------------------------------------------------------------
 # Device info & screen
@@ -138,19 +23,19 @@ def _hierarchy_to_text(xml_str: str) -> str:
 
 @click.command("device-info")
 def cmd_device_info():
-    """Show device information (model, SDK version, screen size, etc.)."""
+    """Show device information (platform, model, screen size, etc. when available)."""
     u2_code = "d.device_info"
-    d = connect_device()
-    info = d.device_info
+    backend = connect_backend()
+    info = backend.device_info()
     output_result(info, u2_code)
 
 
 @click.command("ui-info")
 def cmd_ui_info():
-    """Show UiAutomator device info (screen size, orientation, current package)."""
+    """Show UI runtime info (screen size, orientation, current app, platform)."""
     u2_code = "d.info"
-    d = connect_device()
-    info = d.info
+    backend = connect_backend()
+    info = backend.ui_info()
     output_result(info, u2_code)
 
 
@@ -159,9 +44,9 @@ def cmd_ui_info():
 def cmd_screenshot(filename):
     """Take a screenshot and save to FILENAME (default: screenshot.png)."""
     u2_code = f"d.screenshot({filename!r})"
-    d = connect_device()
+    backend = connect_backend()
     abs_path = os.path.abspath(filename)
-    img = d.screenshot()
+    img = backend.screenshot()
     width, height = img.size
     img.save(abs_path)
     output_result(None, u2_code, extra={"saved_to": abs_path, "resolution": f"{width}x{height}"})
@@ -176,7 +61,7 @@ def cmd_dump_hierarchy(compressed, max_depth, output, raw):
     """Dump the UI hierarchy as a compact indented text tree.
 
     Invisible nodes, pure-container nodes, and noise attributes are removed.
-    Pass --raw to get the original XML from uiautomator2.
+    Pass --raw to get the original backend XML output.
     """
     kwargs_parts = []
     if compressed:
@@ -185,30 +70,23 @@ def cmd_dump_hierarchy(compressed, max_depth, output, raw):
         kwargs_parts.append(f"max_depth={max_depth}")
     u2_code = f"d.dump_hierarchy({', '.join(kwargs_parts)})"
 
-    d = connect_device()
-    kw: dict = {}
-    if compressed:
-        kw["compressed"] = True
-    if max_depth is not None:
-        kw["max_depth"] = max_depth
-    xml = d.dump_hierarchy(**kw)
-
-    result = xml if raw else _hierarchy_to_text(xml)
+    backend = connect_backend()
+    hierarchy = create_hierarchy_service(backend).dump(compressed=compressed, max_depth=max_depth, raw=raw)
 
     if output:
         with open(output, "w", encoding="utf-8") as f:
-            f.write(result)
+            f.write(hierarchy.content)
         output_result(None, u2_code, extra={"saved_to": os.path.abspath(output)})
     else:
-        output_result(result, u2_code)
+        output_result(hierarchy.content, u2_code)
 
 
 @click.command("window-size")
 def cmd_window_size():
     """Get the screen window size (width, height)."""
     u2_code = "d.window_size()"
-    d = connect_device()
-    w, h = d.window_size()
+    backend = connect_backend()
+    w, h = backend.window_size()
     output_result({"width": w, "height": h}, u2_code)
 
 
@@ -221,8 +99,8 @@ def cmd_window_size():
 def cmd_screen_on():
     """Turn the screen on (wake device)."""
     u2_code = "d.screen_on()"
-    d = connect_device()
-    d.screen_on()
+    backend = connect_backend()
+    backend.screen_on()
     output_result(None, u2_code)
 
 
@@ -230,8 +108,8 @@ def cmd_screen_on():
 def cmd_screen_off():
     """Turn the screen off (sleep device)."""
     u2_code = "d.screen_off()"
-    d = connect_device()
-    d.screen_off()
+    backend = connect_backend()
+    backend.screen_off()
     output_result(None, u2_code)
 
 
@@ -245,14 +123,14 @@ def cmd_screen_off():
 )
 def cmd_orientation(set_orientation):
     """Get or set screen orientation."""
-    d = connect_device()
+    backend = connect_backend()
     if set_orientation:
         u2_code = f"d.orientation = {set_orientation!r}"
-        d.orientation = set_orientation
+        backend.set_orientation(set_orientation)
         output_result(None, u2_code)
     else:
         u2_code = "d.orientation"
-        orientation = d.orientation
+        orientation = backend.get_orientation()
         output_result(orientation, u2_code)
 
 
@@ -266,8 +144,14 @@ def cmd_orientation(set_orientation):
 def cmd_press(key):
     """Press a hardware/soft key by name or keycode integer.
 
-    Named keys: home, back, menu, enter, delete, recent, volume_up,
-    volume_down, power, camera, search, space
+    Common named keys: home, back, menu, enter, delete, recent,
+    volume_up, volume_down, power.
+
+    Harmony real-device validated aliases: home, back, recent, menu,
+    enter, delete, volume_up, volume_down, power.
+    On the current Harmony test device, enter/delete were also verified end to
+    end inside a real note-editor input field. Other named keys are
+    backend-dependent; use an integer keycode when you need an unmapped key.
     """
     key_val: int | str
     try:
@@ -277,8 +161,8 @@ def cmd_press(key):
         key_val = key
         u2_code = f"d.press({key_val!r})"
 
-    d = connect_device()
-    d.press(key_val)
+    backend = connect_backend()
+    backend.press(key_val)
     output_result(None, u2_code)
 
 
@@ -296,11 +180,11 @@ def cmd_swipe(duration, steps, fx, fy, tx, ty):
     else:
         u2_code = f"d.swipe({fx}, {fy}, {tx}, {ty}, duration={duration})"
 
-    d = connect_device()
+    backend = connect_backend()
     if steps is not None:
-        d.swipe(fx, fy, tx, ty, steps=steps)
+        backend.swipe(fx, fy, tx, ty, steps=steps)
     else:
-        d.swipe(fx, fy, tx, ty, duration=duration)
+        backend.swipe(fx, fy, tx, ty, duration=duration)
     output_result(None, u2_code)
 
 
@@ -313,8 +197,8 @@ def cmd_swipe(duration, steps, fx, fy, tx, ty):
 def cmd_swipe_ext(scale, direction):
     """High-level directional swipe across the screen."""
     u2_code = f"d.swipe_ext({direction!r}, scale={scale})"
-    d = connect_device()
-    d.swipe_ext(direction, scale=scale)
+    backend = connect_backend()
+    backend.swipe_ext(direction, scale=scale)
     output_result(None, u2_code)
 
 
@@ -324,8 +208,8 @@ def cmd_swipe_ext(scale, direction):
 def cmd_click_coord(x, y):
     """Click at absolute or relative (0-1) coordinates."""
     u2_code = f"d.click({x}, {y})"
-    d = connect_device()
-    d.click(x, y)
+    backend = connect_backend()
+    backend.click(x, y)
     output_result(None, u2_code)
 
 
@@ -336,8 +220,8 @@ def cmd_click_coord(x, y):
 def cmd_double_click(duration, x, y):
     """Double-click at coordinates."""
     u2_code = f"d.double_click({x}, {y}, duration={duration})"
-    d = connect_device()
-    d.double_click(x, y, duration=duration)
+    backend = connect_backend()
+    backend.double_click(x, y, duration=duration)
     output_result(None, u2_code)
 
 
@@ -348,8 +232,8 @@ def cmd_double_click(duration, x, y):
 def cmd_long_click_coord(duration, x, y):
     """Long-click at coordinates."""
     u2_code = f"d.long_click({x}, {y}, duration={duration})"
-    d = connect_device()
-    d.long_click(x, y, duration=duration)
+    backend = connect_backend()
+    backend.long_click(x, y, duration=duration)
     output_result(None, u2_code)
 
 
@@ -360,8 +244,8 @@ def cmd_send_keys(no_clear, text):
     """Type text into the currently focused input field."""
     clear = not no_clear
     u2_code = f"d.send_keys({text!r}, clear={clear})"
-    d = connect_device()
-    d.send_keys(text, clear=clear)
+    backend = connect_backend()
+    backend.send_keys(text, clear=clear)
     output_result(None, u2_code)
 
 
@@ -374,8 +258,8 @@ def cmd_send_keys(no_clear, text):
 def cmd_open_notification():
     """Pull down the notification shade."""
     u2_code = "d.open_notification()"
-    d = connect_device()
-    d.open_notification()
+    backend = connect_backend()
+    backend.open_notification()
     output_result(None, u2_code)
 
 
@@ -383,18 +267,18 @@ def cmd_open_notification():
 def cmd_open_quick_settings():
     """Pull down the quick settings panel."""
     u2_code = "d.open_quick_settings()"
-    d = connect_device()
-    d.open_quick_settings()
+    backend = connect_backend()
+    backend.open_quick_settings()
     output_result(None, u2_code)
 
 
 @click.command("open-url")
 @click.argument("url")
 def cmd_open_url(url):
-    """Open a URL in the default browser via intent."""
+    """Open a URL in the default browser or system handler."""
     u2_code = f"d.open_url({url!r})"
-    d = connect_device()
-    d.open_url(url)
+    backend = connect_backend()
+    backend.open_url(url)
     output_result(None, u2_code)
 
 
@@ -413,8 +297,8 @@ def cmd_shell(timeout, cmd):
     """
     cmd_str = " ".join(cmd)
     u2_code = f"d.shell({cmd_str!r}, timeout={timeout})"
-    d = connect_device()
-    resp = d.shell(cmd_str, timeout=timeout)
+    backend = connect_backend()
+    resp = backend.shell(cmd_str, timeout=timeout)
     output_result(
         {"output": resp.output, "exit_code": resp.exit_code},
         u2_code,
@@ -428,8 +312,67 @@ def cmd_shell(timeout, cmd):
 
 @click.command("current-app")
 def cmd_current_app():
-    """Show the currently running foreground app (package + activity)."""
+    """Show the current foreground app info (package/bundle and activity/ability when available)."""
     u2_code = "d.app_current()"
-    d = connect_device()
-    info = d.app_current()
+    backend = connect_backend()
+    info = backend.current_app()
     output_result(info, u2_code)
+
+
+@click.command("playback-info")
+@click.option("--package", default=None, help="Prefer playback session for this package when supported")
+def cmd_playback_info(package):
+    """Show media playback info using `dumpsys media_session` on Android or `AVSessionService` hidumper on Harmony."""
+    backend = connect_backend()
+    if getattr(backend, "platform", None) == "harmony":
+        u2_code = "d.shell(\"hidumper -s AVSessionService -a '-show_session_info'\")"
+    else:
+        u2_code = "d.shell('dumpsys media_session')"
+    info = backend.playback_info(package=package)
+    output_result(info, u2_code)
+
+
+@click.command("media-control")
+@click.argument(
+    "action",
+    type=click.Choice(["play", "pause", "play-pause", "next", "previous", "stop"]),
+)
+def cmd_media_control(action):
+    """Control media playback when the backend exposes a reliable control path.
+
+    On Harmony, `play`, `pause`, `play-pause`, `next`, and `previous` are
+    verified end to end through the zero-install `uitest uiInput keyEvent` path.
+    `stop` is dispatched too, but tested players may interpret it as a pause-like
+    transition rather than a strict stopped state.
+    """
+    u2_code_map = {
+        "play-pause": "d.press(85)",
+        "stop": "d.press(86)",
+        "next": "d.press(87)",
+        "previous": "d.press(88)",
+        "play": "d.press(126)",
+        "pause": "d.press(127)",
+    }
+    ctx = click.get_current_context(silent=True)
+    platform = resolve_platform(ctx.obj.get("platform") if ctx is not None and isinstance(ctx.obj, dict) else None)
+    serial = ctx.obj.get("serial") if ctx is not None and isinstance(ctx.obj, dict) else None
+
+    if platform == "harmony":
+        try:
+            harmony_u2_code = run_harmony_media_control_if_available(action, serial=serial)
+            if harmony_u2_code is not None:
+                output_result(None, harmony_u2_code, extra={"action": action})
+                return
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(
+            "Harmony media-control is unavailable on this device: the built-in zero-install "
+            "uitest uiInput keyEvent path was not available."
+        )
+
+    backend = connect_backend()
+    try:
+        backend.media_control(action)
+    except NotImplementedError as exc:
+        raise click.ClickException(str(exc)) from exc
+    output_result(None, u2_code_map[action], extra={"action": action})

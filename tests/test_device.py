@@ -57,3 +57,29 @@ class ConnectDeviceTests(unittest.TestCase):
 
         mock_adb_device.assert_not_called()
         mock_connect.assert_called_once_with("SERIAL-A")
+
+    def test_connect_backend_wraps_android_device_and_uses_backend_cache(self) -> None:
+        connected_device = object()
+
+        with patch("u2cli.device._connect_raw_device", return_value=connected_device) as mock_connect:
+            backend = device.connect_backend("SERIAL-A", platform="android")
+            cached_backend = device.connect_backend("SERIAL-A", platform="android")
+
+        self.assertIs(backend, cached_backend)
+        self.assertEqual(backend.platform, "android")
+        self.assertEqual(backend.backend_name, "uiautomator2")
+        self.assertIs(backend.raw_device(), connected_device)
+        mock_connect.assert_called_once_with("android", "SERIAL-A")
+
+    def test_connect_backend_wraps_harmony_driver_and_uses_platform_connector(self) -> None:
+        connected_driver = object()
+
+        with patch("u2cli.device._connect_raw_device", return_value=connected_driver) as mock_connect:
+            backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+            cached_backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+
+        self.assertIs(backend, cached_backend)
+        self.assertEqual(backend.platform, "harmony")
+        self.assertEqual(backend.backend_name, "hmdriver2+hdc")
+        self.assertIs(backend.raw_device(), connected_driver)
+        mock_connect.assert_called_once_with("harmony", "HDC-DEVICE")

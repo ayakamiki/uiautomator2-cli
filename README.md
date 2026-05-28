@@ -15,6 +15,12 @@ Goals:
 pip install uiautomator2-cli
 ```
 
+For Harmony support:
+
+```bash
+pip install 'uiautomator2-cli[harmony]'
+```
+
 Or with [uv](https://github.com/astral-sh/uv):
 
 ```bash
@@ -32,6 +38,22 @@ uv sync --all-groups
 - Python >= 3.8
 - An Android device connected through ADB (USB or network)
 
+For Harmony support:
+- `hdc` available in `PATH` (or via `HDC_BIN`)
+- `hmdriver2` installed via the `harmony` extra
+
+## Android vs Harmony
+
+| Topic | Android | Harmony |
+| --- | --- | --- |
+| Install | `pip install uiautomator2-cli` | `pip install 'uiautomator2-cli[harmony]'` |
+| Transport | ADB | HDC |
+| Driver runtime | `uiautomator2` | `hmdriver2` |
+| Recommended CLI flag | `--platform android` | `--platform harmony` |
+| Default when omitted | `auto` resolves to Android | Must opt in explicitly |
+| `--package` meaning | Native package selector | Hierarchy bundle/package filter before fallback to a concrete native selector |
+| Dynamic selector path | Native `uiautomator2` selector fields | Hierarchy-assisted resolution, then fallback to a concrete native selector |
+
 ## Quick Start
 
 ```bash
@@ -41,14 +63,43 @@ u2cli --help
 # Click by text
 u2cli click --text "Settings"
 
-# Get text by resource-id
-u2cli get-text --resource-id com.android.settings:id/title
+# Get text by resource/element ID
+u2cli get-text --resource-id entry_title
 
 # Screenshot
 u2cli screenshot screen.png
 
 # Show foreground app
 u2cli current-app
+
+# Press a common named key
+u2cli press back
+
+# Harmony real-device validated aliases: recent / menu / enter / delete /
+# volume_up / volume_down / power
+u2cli --platform harmony press recent
+
+# Show active media playback info on Android or Harmony
+# `u2_code` shows `dumpsys media_session` on Android and `AVSessionService` hidumper on Harmony
+u2cli playback-info
+
+# Control media playback on Android or Harmony
+u2cli media-control play-pause
+
+# Harmony also supports zero-install media control over hdc + uitest
+u2cli --platform harmony media-control next
+
+# On Harmony, `stop` is delivered but tested players may treat it like pause
+u2cli --platform harmony media-control stop
+
+# Harmony element examples: click by description regex
+u2cli --platform harmony click --description-matches "Login.*button"
+
+# Harmony element examples: get text by bundle/package + text prefix
+u2cli --platform harmony get-text --package com.demo.app --text-starts-with "Welcome"
+
+# Harmony element examples: check existence by bundle/package + text contains
+u2cli --platform harmony exists --package com.demo.app --text-contains "Login"
 ```
 
 ## Daemon-First Design
@@ -58,20 +109,25 @@ u2cli current-app
 For normal commands:
 - First command auto-starts daemon
 - Following commands reuse the same daemon process
+- If the on-disk Python code changes, the CLI detects a stale daemon and restarts it automatically
 
 Commands not delegated to daemon:
 - `u2cli daemon ...` (daemon management)
 - `u2cli repl` (interactive same-process mode)
 
+Development controls:
+- `u2cli --no-daemon ...` runs a command in-process and bypasses the background daemon
+- `u2cli daemon restart` forces a fresh daemon for the current platform/serial target
+
 ## Multi-Device Isolation
 
-Daemon instances are isolated by device serial.
+Daemon instances are isolated by platform + device serial.
 
-- `-s <serial>`: use the daemon instance for that serial
-- No `-s`: use the default daemon instance
-- Each serial has independent socket, pid file, and log file
+- `--platform <platform>` + `-s <serial>`: use the daemon instance for that exact platform/serial pair
+- `--platform <platform>` without `-s`: use the default daemon instance for that platform
+- Each platform/serial pair has independent socket, pid file, and log file
 
-For multi-device workflows, always pass `-s` explicitly.
+For mixed Android/Harmony workflows, always pass `--platform` explicitly. For multi-device workflows, also pass `-s` explicitly.
 
 ## Connection and Retry Behavior
 
@@ -81,19 +137,41 @@ For multi-device workflows, always pass `-s` explicitly.
 - Outside daemon path: single attempt
 - Per-serial device object is cached in-process and reused
 
+## Real-Device Smoke
+
+Use `u2cli-smoke` for a fast sanity check against a connected target.
+
+```bash
+# Android smoke with playback_info included
+u2cli-smoke --platform android -s DEVICE-001 --json
+
+# Harmony smoke with screenshot artifact
+u2cli-smoke --platform harmony -s TARGET-001 --screenshot smoke.png
+```
+
+The smoke run checks device info, window size, current app, screenshot capture, hierarchy dump, and `playback-info`.
+On Android, `playback-info` reads `dumpsys media_session` and is the preferred verification path for member-only media flows where paywall overlays can hide the actual playback result.
+On Harmony, `playback-info` reads `AVSessionService` metadata and can still report the active background playback session even when the foreground app is not the music app.
+
+`media-control` maps `play`, `pause`, `play-pause`, `next`, `previous`, and `stop` to platform media controls.
+On Harmony, `u2cli` uses the built-in zero-install `uitest uiInput keyEvent` path over `hdc`.
+On tested Harmony hardware, `play`, `pause`, `play-pause`, `next`, and `previous` changed the active AVSession as expected. `stop` was delivered too, but Huawei Music, QQ Music, and Kugou each interpreted it as a pause-style transition rather than a distinct stopped state. Treat Harmony `stop` as "dispatch guaranteed, resulting playback state player-dependent" instead of assuming a strict stopped state.
+
 ## Logging
 
 ### Log Location
 
-Per-serial log files under:
+Per-platform/per-serial log files under:
 
 ```bash
 ~/.u2cli/logs/
 ```
 
 Examples:
-- `u2cli-daemon-default.log`
-- `u2cli-daemon-s-xxxxxxxxxx.log`
+- `u2cli-daemon-android-default.log`
+- `u2cli-daemon-android-s-xxxxxxxxxx.log`
+- `u2cli-daemon-harmony-default.log`
+- `u2cli-daemon-harmony-s-xxxxxxxxxx.log`
 
 ### Log Rotation
 
@@ -101,7 +179,7 @@ Examples:
 - `maxBytes = 5MB`
 - `backupCount = 3`
 
-That means current log + up to 3 rotated files per serial.
+That means current log + up to 3 rotated files per platform/serial pair.
 
 ### Log Content
 
@@ -157,7 +235,7 @@ u2cli daemon stop
 Example:
 
 ```bash
-export ANDROID_SERIAL=emulator-5554
+export ANDROID_SERIAL=TARGET-001
 export U2CLI_DAEMON_LOG_FULL_OUTPUT=1
 u2cli device-info
 ```
@@ -167,12 +245,79 @@ u2cli device-info
 Use before subcommand:
 
 - `-s, --serial`: target device serial
+- `--platform`: backend platform (`android`, `harmony`, `auto`)
 - `--json`: JSON output
 - `--version`: show version
+
+## Selector Notes
+
+Element commands share the same cross-platform selector surface across Android and Harmony.
+
+- `--description-matches`: match accessibility description by regex
+- `--description-starts-with`: match accessibility description by prefix
+- `--package`: package/bundle filter
+
+`--package` semantics are platform-specific:
+
+- Android: matches the native package name selector
+- Harmony: filters by hierarchy bundle/package attributes during selector resolution, then falls back to a concrete native selector for execution
+
+Example:
+
+```bash
+u2cli --platform harmony click \
+  --description-matches "Login.*button" \
+  --package com.demo.app
+```
+
+## Harmony Selector Behavior
+
+When `--platform harmony` is enabled:
+
+- `--description-matches` and `--description-starts-with` are supported at the CLI layer
+- `--text-contains`, `--text-starts-with`, `--text-matches`, `--description-matches`, `--description-starts-with`, and `--package` use hierarchy-assisted resolution before execution
+- `--package` is a bundle/package filter during selector resolution, not a direct native Harmony selector field
+- In mixed-platform scripts, prefer passing `--platform harmony` explicitly instead of relying on defaults
+
+## Harmony current-app Notes
+
+On Harmony devices, `current-app` now uses layered detection:
+
+- Foreground app pages prefer `aa dump` foreground mission data and return `package + activity/ability`
+- Home/launcher scenes fall back to the focused top-level hierarchy bundle
+- On tested real devices, the home screen returns `com.ohos.sceneboard`
+
+Examples:
+
+```bash
+u2cli --platform harmony current-app
+# Home example result: {"package": "com.ohos.sceneboard", "activity": null}
+```
+
+## Harmony XPath Examples
+
+`xpath-*` commands accept either a full XPath string or a service-layer locator shorthand:
+
+- `Login`: exact text
+- `%Login%`: text contains
+- `Welcome%`: text starts with
+- `%button`: text ends with
+- `^Login.*`: text regex
+- `@entry_button`: resource/element ID shorthand, resolved to Harmony `id`
+
+Examples:
+
+```bash
+u2cli --platform harmony xpath-click "%Login%"
+u2cli --platform harmony xpath-get-text "Welcome%"
+u2cli --platform harmony xpath-exists "^Login.*"
+```
 
 ## Command Overview
 
 ### Element Commands
+
+Selector-based element actions shared across Android and Harmony.
 
 - `click`
 - `long-click`
@@ -186,6 +331,8 @@ Use before subcommand:
 - `scroll`
 
 ### XPath Commands
+
+Locator-based element actions using either full XPath or service-layer shorthand.
 
 - `xpath-click`
 - `xpath-exists`
@@ -215,6 +362,16 @@ Use before subcommand:
 - `shell`
 - `current-app`
 
+`press KEY` accepts integer keycodes on every backend. For named keys, the shared documented set is
+`home`, `back`, `menu`, `enter`, `delete`, `recent`, `volume_up`, `volume_down`, `power`.
+On the connected Harmony test device, `home`, `back`, `recent`, `menu`, `enter`, `delete`,
+`volume_up`, `volume_down`, and `power` were all validated to dispatch real device key events.
+`power` produced a visible screen-off transition and wake-up recovery; `volume_up` / `volume_down`
+also produced visible screen changes. `enter` / `delete` were further validated end to end in a real
+Harmony Notes editor: typing `AB`, then pressing `delete`, reduced the visible body text to `A`; pressing
+`enter` and typing `C` produced a second line (`A` newline `C`). `recent` and `menu` still dispatched
+successfully, but their visible result remained scene-dependent on the tested launcher/settings context.
+
 ### App Commands
 
 - `app-start`
@@ -235,17 +392,17 @@ Use before subcommand:
 ## Common Examples
 
 ```bash
-# Click on specific device
-u2cli -s emulator-5554 click --text "Wi-Fi"
+# Click on a specific platform/serial target
+u2cli -s TARGET-001 click --text "Wi-Fi"
 
 # JSON output
 u2cli --json exists --text "Settings"
 
-# Check daemon status for a device
-u2cli -s emulator-5554 daemon status
+# Check daemon status for the current platform/serial target
+u2cli -s TARGET-001 daemon status
 
-# Tail daemon logs for a device
-u2cli -s emulator-5554 daemon logs --lines 200
+# Tail daemon logs for the current platform/serial target
+u2cli -s TARGET-001 daemon logs --lines 200
 ```
 
 ## JSON Output Examples
@@ -254,8 +411,17 @@ u2cli -s emulator-5554 daemon logs --lines 200
 $ u2cli --json exists --text "Settings"
 {"u2_code": "d(text='Settings').exists", "result": true}
 
-$ u2cli --json get-text --resource-id com.android.settings:id/title
-{"u2_code": "d(resourceId='com.android.settings:id/title').get_text(timeout=3.0)", "result": "Settings"}
+# Get text by resource/element ID
+$ u2cli --json get-text --resource-id entry_title
+{"u2_code": "d(resourceId='entry_title').get_text(timeout=3.0)", "result": "Welcome"}
+
+# Android playback-info output
+$ u2cli --json playback-info
+{"u2_code": "d.shell('dumpsys media_session')", "result": {"source": "media_session", "package": "com.tencent.qqmusic", "state": {"code": 3, "name": "playing"}}}
+
+# Harmony playback-info output
+$ u2cli --json --platform harmony playback-info
+{"u2_code": "d.shell(\"hidumper -s AVSessionService -a '-show_session_info'\")", "result": {"source": "avsession", "package": "com.huawei.hmsapp.music", "state": {"code": 2, "name": "paused"}}}
 ```
 
 ## Troubleshooting

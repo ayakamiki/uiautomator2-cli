@@ -18,7 +18,15 @@ import sys
 
 import click
 
-from u2cli.daemon import daemon_status, read_log_tail, run_via_daemon, should_delegate_command, start_daemon, stop_daemon
+from u2cli.daemon import (
+    daemon_status,
+    read_log_tail,
+    restart_daemon,
+    run_via_daemon,
+    should_delegate_command,
+    start_daemon,
+    stop_daemon,
+)
 
 # Element commands
 from u2cli.element import (
@@ -46,10 +54,12 @@ from u2cli.screen import (
     cmd_double_click,
     cmd_dump_hierarchy,
     cmd_long_click_coord,
+    cmd_media_control,
     cmd_open_notification,
     cmd_open_quick_settings,
     cmd_open_url,
     cmd_orientation,
+    cmd_playback_info,
     cmd_press,
     cmd_screen_off,
     cmd_screen_on,
@@ -84,9 +94,17 @@ from u2cli.app import (
 @click.group()
 @click.version_option()
 @click.option("-s", "--serial", default=None, envvar="ANDROID_SERIAL", help="Target device serial (or set ANDROID_SERIAL)")
+@click.option(
+    "--platform",
+    type=click.Choice(["android", "harmony", "auto"]),
+    default="auto",
+    show_default=True,
+    help="Backend platform: android, harmony, or auto (auto resolves to android; harmony requires explicit opt-in)",
+)
+@click.option("--no-daemon", is_flag=True, help="Run in-process instead of routing the command through the background daemon")
 @click.option("--json", "output_json", is_flag=True, help="Output result as JSON")
 @click.pass_context
-def cli(ctx, serial, output_json):
+def cli(ctx, serial, platform, no_daemon, output_json):
     """u2cli — uiautomator2 command-line interface.
 
     Every command prints the equivalent uiautomator2 Python code alongside
@@ -104,10 +122,12 @@ def cli(ctx, serial, output_json):
     """
     ctx.ensure_object(dict)
     ctx.obj["serial"] = serial
+    ctx.obj["platform"] = platform
+    ctx.obj["no_daemon"] = no_daemon
     ctx.obj["output_json"] = output_json
 
-    if should_delegate_command(invoked_subcommand=ctx.invoked_subcommand):
-        exit_code = run_via_daemon(serial=serial, argv=sys.argv[1:])
+    if not no_daemon and should_delegate_command(invoked_subcommand=ctx.invoked_subcommand):
+        exit_code = run_via_daemon(serial=serial, platform=platform, argv=sys.argv[1:])
         ctx.exit(exit_code)
 
 
@@ -159,7 +179,7 @@ def cmd_repl(ctx):
 
 @click.group("daemon")
 def daemon_group():
-    """Manage the background u2cli daemon process."""
+    """Manage the background u2cli daemon for the current platform/serial target."""
 
 
 @daemon_group.command("start")
@@ -171,8 +191,12 @@ def daemon_group():
 )
 @click.pass_context
 def cmd_daemon_start(ctx, full_output_log):
-    """Start daemon for current device serial."""
-    ok, message = start_daemon(ctx.obj.get("serial"), full_output_log=full_output_log)
+    """Start daemon for the current platform/serial target."""
+    ok, message = start_daemon(
+        ctx.obj.get("serial"),
+        platform=ctx.obj.get("platform"),
+        full_output_log=full_output_log,
+    )
     if ctx.obj.get("output_json"):
         click.echo(json.dumps({"ok": ok, "message": message}, ensure_ascii=False))
     else:
@@ -184,8 +208,31 @@ def cmd_daemon_start(ctx, full_output_log):
 @daemon_group.command("stop")
 @click.pass_context
 def cmd_daemon_stop(ctx):
-    """Stop daemon for current device serial."""
-    ok, message = stop_daemon(ctx.obj.get("serial"))
+    """Stop daemon for the current platform/serial target."""
+    ok, message = stop_daemon(ctx.obj.get("serial"), platform=ctx.obj.get("platform"))
+    if ctx.obj.get("output_json"):
+        click.echo(json.dumps({"ok": ok, "message": message}, ensure_ascii=False))
+    else:
+        click.echo(message)
+    if not ok:
+        raise click.ClickException(message)
+
+
+@daemon_group.command("restart")
+@click.option(
+    "--full-output-log/--no-full-output-log",
+    "full_output_log",
+    default=None,
+    help="Write full command stdout/stderr into daemon log file",
+)
+@click.pass_context
+def cmd_daemon_restart(ctx, full_output_log):
+    """Restart daemon for the current platform/serial target."""
+    ok, message = restart_daemon(
+        ctx.obj.get("serial"),
+        platform=ctx.obj.get("platform"),
+        full_output_log=full_output_log,
+    )
     if ctx.obj.get("output_json"):
         click.echo(json.dumps({"ok": ok, "message": message}, ensure_ascii=False))
     else:
@@ -197,8 +244,8 @@ def cmd_daemon_stop(ctx):
 @daemon_group.command("status")
 @click.pass_context
 def cmd_daemon_status(ctx):
-    """Show daemon status for current device serial."""
-    status = daemon_status(ctx.obj.get("serial"))
+    """Show daemon status for the current platform/serial target."""
+    status = daemon_status(ctx.obj.get("serial"), platform=ctx.obj.get("platform"))
     if ctx.obj.get("output_json"):
         click.echo(json.dumps(status, ensure_ascii=False))
         return
@@ -208,6 +255,18 @@ def cmd_daemon_status(ctx):
     click.echo(f"pid_file: {status.get('pid_file')}")
     click.echo(f"log_file: {status.get('log_file')}")
     click.echo(f"full_output_log: {status.get('full_output_log', False)}")
+    if "code_fingerprint" in status:
+        click.echo(f"code_fingerprint: {status['code_fingerprint']}")
+    if "started_at" in status:
+        click.echo(f"started_at: {status['started_at']}")
+    if "last_request_at" in status:
+        click.echo(f"last_request_at: {status['last_request_at']}")
+    if "request_count" in status:
+        click.echo(f"request_count: {status['request_count']}")
+    if "backend_cached" in status:
+        click.echo(f"backend_cached: {status['backend_cached']}")
+    if "active_device_id" in status:
+        click.echo(f"active_device_id: {status['active_device_id']}")
     if "pid" in status:
         click.echo(f"pid: {status['pid']}")
 
@@ -216,8 +275,8 @@ def cmd_daemon_status(ctx):
 @click.option("--lines", default=200, type=int, help="Number of latest log lines")
 @click.pass_context
 def cmd_daemon_logs(ctx, lines):
-    """Show daemon log tail for current device serial."""
-    text = read_log_tail(ctx.obj.get("serial"), lines=lines)
+    """Show daemon log tail for the current platform/serial target."""
+    text = read_log_tail(ctx.obj.get("serial"), lines=lines, platform=ctx.obj.get("platform"))
     if not text:
         click.echo("No log entries yet.")
         return
@@ -269,6 +328,8 @@ cli.add_command(cmd_open_quick_settings, name="open-quick-settings")
 cli.add_command(cmd_open_url, name="open-url")
 cli.add_command(cmd_shell, name="shell")
 cli.add_command(cmd_current_app, name="current-app")
+cli.add_command(cmd_playback_info, name="playback-info")
+cli.add_command(cmd_media_control, name="media-control")
 
 # ---------------------------------------------------------------------------
 # App management commands
