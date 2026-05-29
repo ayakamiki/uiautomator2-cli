@@ -142,6 +142,8 @@ daemon 现在以 platform + serial 作为隔离维度。
 
 可以用 `u2cli-smoke` 对已连接设备做一轮快速 sanity check。
 
+如果要做覆盖 `dump-hierarchy` 和 `xpath-*` 的 Harmony 深度真机验收，请参考 [docs/harmony-real-device-checklist.md](docs/harmony-real-device-checklist.md)。
+
 ```bash
 # Android smoke，包含 playback-info
 u2cli-smoke --platform android -s DEVICE-001 --json
@@ -295,23 +297,34 @@ u2cli --platform harmony current-app
 # 主页示例结果：{"package": "com.ohos.sceneboard", "activity": null}
 ```
 
+## Harmony 支持边界
+
+Harmony backend 的对外支持面目前刻意收得比底层原始 backend 能力更窄。
+
+- `click`、`long-click`、`get-text`、`set-text`、`clear-text`、`exists` 这类基于 selector 的共享元素命令已经支持。
+- Harmony 上的 `xpath-*` 现在已经切到 normalized hierarchy/XPath service，不再依赖之前那层 backend-native locator bridge。
+- Harmony 上的 `dump-hierarchy` 现在也基于 normalized hierarchy model 渲染；如果需要原始 backend XML，继续用 `--raw`。
+- Harmony 上的 `open-notification` 和 `open-quick-settings` 目前是 `partial` + `best_effort` 的手势 recipe，还没有 panel 打开状态校验。
+- Harmony 上的 `app-install` 和 `app-uninstall` 目前仍然 gate，直到 Android APK 与 Harmony package/HAP 的 artifact model 完成统一。
+- Harmony 上的 `app-info`、`app-list`、`app-list-running` 目前是 `partial` 的兼容视图，还不是最终的统一 app service schema。
+
 ## Harmony XPath 示例
 
-`xpath-*` 命令既支持完整 XPath，也支持 service 层 locator shorthand：
+Harmony 上的 `xpath-*` 现在走 normalized hierarchy/XPath service，既支持完整 XPath，也支持原有 shorthand：
 
-- `Login`：精确文本
+- `Login`：精确匹配 text / description / resource-id
 - `%Login%`：文本包含
 - `Welcome%`：文本前缀匹配
 - `%button`：文本后缀匹配
 - `^Login.*`：文本正则匹配
-- `@entry_button`：resource/element ID shorthand，会解析成 Harmony 的 `id`
+- `@entry_button`：精确 resource/element ID shorthand
 
 示例：
 
 ```bash
 u2cli --platform harmony xpath-click "%Login%"
-u2cli --platform harmony xpath-get-text "Welcome%"
-u2cli --platform harmony xpath-exists "^Login.*"
+u2cli --platform harmony xpath-get-text "//Button[contains(@content-desc, 'Primary')]"
+u2cli --platform harmony xpath-exists "//Button[@text='Login'][2]"
 ```
 
 ## 命令总览
@@ -333,7 +346,7 @@ u2cli --platform harmony xpath-exists "^Login.*"
 
 ### XPath 操作
 
-基于 locator 的元素操作，既支持完整 XPath，也支持 service 层 shorthand。
+基于 locator 的元素操作，当前由 normalized hierarchy/XPath service 驱动。
 
 - `xpath-click`
 - `xpath-exists`
@@ -363,6 +376,11 @@ u2cli --platform harmony xpath-exists "^Login.*"
 - `shell`
 - `current-app`
 
+Harmony 上当前以 `partial` 暴露的设备/屏幕命令：
+
+- `open-notification`：best-effort 手势 recipe，当前没有 panel 校验。
+- `open-quick-settings`：best-effort 手势 recipe，当前没有 panel 校验。
+
 `press KEY` 在所有 backend 上都接受整数 keycode。对命名键，当前统一文档集合是
 `home`、`back`、`menu`、`enter`、`delete`、`recent`、`volume_up`、`volume_down`、`power`。
 在当前连接的 Harmony 真机上，`home`、`back`、`recent`、`menu`、`enter`、`delete`、
@@ -383,6 +401,12 @@ u2cli --platform harmony xpath-exists "^Login.*"
 - `app-list`
 - `app-list-running`
 - `app-wait`
+
+Harmony 上当前的应用命令边界：
+
+- `app-start`、`app-stop`、`app-clear`、`app-wait` 属于当前共享 Harmony 子集。
+- `app-install`、`app-uninstall` 目前在 Harmony 上仍然 gate。
+- `app-info`、`app-list`、`app-list-running` 在 Harmony 上当前是 `partial` 兼容视图，JSON 输出里会带 `partial` 元数据。
 
 ### 其它
 

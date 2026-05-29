@@ -141,6 +141,8 @@ For mixed Android/Harmony workflows, always pass `--platform` explicitly. For mu
 
 Use `u2cli-smoke` for a fast sanity check against a connected target.
 
+For a deeper Harmony real-device acceptance pass covering `dump-hierarchy` and `xpath-*`, see [docs/harmony-real-device-checklist.md](docs/harmony-real-device-checklist.md).
+
 ```bash
 # Android smoke with playback_info included
 u2cli-smoke --platform android -s DEVICE-001 --json
@@ -294,23 +296,34 @@ u2cli --platform harmony current-app
 # Home example result: {"package": "com.ohos.sceneboard", "activity": null}
 ```
 
+## Harmony Support Boundary
+
+The Harmony backend surface is intentionally narrower than the raw backend internals.
+
+- Shared selector-based element commands such as `click`, `long-click`, `get-text`, `set-text`, `clear-text`, and `exists` are supported.
+- `xpath-*` now runs through the normalized hierarchy/XPath service on Harmony instead of the earlier backend-native locator bridge.
+- `dump-hierarchy` now renders from the normalized hierarchy model on Harmony. `--raw` still returns backend XML when you need the original payload.
+- `open-notification` and `open-quick-settings` are currently partial best-effort gesture recipes on Harmony. They do not yet verify panel-open state.
+- `app-install` and `app-uninstall` are currently gated on Harmony until the app artifact model is normalized across Android APK and Harmony package/HAP flows.
+- `app-info`, `app-list`, and `app-list-running` are currently partial compatibility views on Harmony rather than the final normalized app-service schema.
+
 ## Harmony XPath Examples
 
-`xpath-*` commands accept either a full XPath string or a service-layer locator shorthand:
+`xpath-*` commands now use the normalized hierarchy/XPath service on Harmony. They support both full XPath and the existing shorthand forms:
 
-- `Login`: exact text
+- `Login`: exact text / description / resource-id match
 - `%Login%`: text contains
 - `Welcome%`: text starts with
 - `%button`: text ends with
 - `^Login.*`: text regex
-- `@entry_button`: resource/element ID shorthand, resolved to Harmony `id`
+- `@entry_button`: exact resource/element ID shorthand
 
 Examples:
 
 ```bash
 u2cli --platform harmony xpath-click "%Login%"
-u2cli --platform harmony xpath-get-text "Welcome%"
-u2cli --platform harmony xpath-exists "^Login.*"
+u2cli --platform harmony xpath-get-text "//Button[contains(@content-desc, 'Primary')]"
+u2cli --platform harmony xpath-exists "//Button[@text='Login'][2]"
 ```
 
 ## Command Overview
@@ -332,7 +345,7 @@ Selector-based element actions shared across Android and Harmony.
 
 ### XPath Commands
 
-Locator-based element actions using either full XPath or service-layer shorthand.
+Locator-based element actions backed by the normalized hierarchy/XPath service.
 
 - `xpath-click`
 - `xpath-exists`
@@ -362,6 +375,11 @@ Locator-based element actions using either full XPath or service-layer shorthand
 - `shell`
 - `current-app`
 
+Harmony notes for partially exposed screen/device commands:
+
+- `open-notification`: partial best-effort Harmony gesture recipe without panel verification.
+- `open-quick-settings`: partial best-effort Harmony gesture recipe without panel verification.
+
 `press KEY` accepts integer keycodes on every backend. For named keys, the shared documented set is
 `home`, `back`, `menu`, `enter`, `delete`, `recent`, `volume_up`, `volume_down`, `power`.
 On the connected Harmony test device, `home`, `back`, `recent`, `menu`, `enter`, `delete`,
@@ -383,6 +401,12 @@ successfully, but their visible result remained scene-dependent on the tested la
 - `app-list`
 - `app-list-running`
 - `app-wait`
+
+Harmony notes for app commands:
+
+- `app-start`, `app-stop`, `app-clear`, and `app-wait` are part of the current shared Harmony subset.
+- `app-install` and `app-uninstall` are currently gated on Harmony.
+- `app-info`, `app-list`, and `app-list-running` are currently partial compatibility views on Harmony and include `partial` metadata in JSON output.
 
 ### Others
 
