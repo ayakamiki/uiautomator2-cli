@@ -17,6 +17,10 @@ harmony = [
 name = "lanbaoshen"
 email = "lanbaoshen@icloud.com"
 
+[[project.authors]]
+name = "martinzhang"
+email = "2444056476@qq.com"
+
 [project.scripts]
 u2cli = "u2cli.cli:main"
 u2cli-smoke = "u2cli.smoke:main"
