@@ -141,7 +141,7 @@ For mixed Android/Harmony workflows, always pass `--platform` explicitly. For mu
 
 Use `u2cli-smoke` for a fast sanity check against a connected target.
 
-For a deeper Harmony real-device acceptance pass covering `dump-hierarchy` and `xpath-*`, see [docs/harmony-real-device-checklist.md](docs/harmony-real-device-checklist.md).
+For a deeper Harmony real-device acceptance pass covering `dump-hierarchy` and `xpath-*`, see [docs/harmony-real-device-checklist.en.md](docs/harmony-real-device-checklist.en.md).
 
 ```bash
 # Android smoke with playback_info included

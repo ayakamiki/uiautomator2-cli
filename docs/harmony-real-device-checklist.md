@@ -1,5 +1,7 @@
 # Harmony 真机验证 Checklist
 
+English version: [docs/harmony-real-device-checklist.en.md](docs/harmony-real-device-checklist.en.md)
+
 用于验证 Harmony backend 当前已开放能力，重点覆盖本轮新增或变更的 `dump-hierarchy` 与 `xpath-*` 路径。
 
 适用范围：
