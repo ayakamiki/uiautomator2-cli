@@ -16,6 +16,16 @@ from u2cli.backends.harmony_hm import run_harmony_media_control_if_available
 from u2cli.device import connect_backend, output_result
 from u2cli.services import create_hierarchy_service
 
+
+def _harmony_partial_extra(note: str, **extra):
+    payload = {
+        "partial": True,
+        "support_level": "partial",
+        "note": note,
+    }
+    payload.update(extra)
+    return payload
+
 # ---------------------------------------------------------------------------
 # Device info & screen
 # ---------------------------------------------------------------------------
@@ -260,7 +270,13 @@ def cmd_open_notification():
     u2_code = "d.open_notification()"
     backend = connect_backend()
     backend.open_notification()
-    output_result(None, u2_code)
+    extra = None
+    if getattr(backend, "platform", None) == "harmony":
+        extra = _harmony_partial_extra(
+            "Harmony open-notification currently uses a best-effort gesture recipe without panel-state verification.",
+            verification="best_effort",
+        )
+    output_result(None, u2_code, extra=extra)
 
 
 @click.command("open-quick-settings")
@@ -269,7 +285,13 @@ def cmd_open_quick_settings():
     u2_code = "d.open_quick_settings()"
     backend = connect_backend()
     backend.open_quick_settings()
-    output_result(None, u2_code)
+    extra = None
+    if getattr(backend, "platform", None) == "harmony":
+        extra = _harmony_partial_extra(
+            "Harmony open-quick-settings currently uses a best-effort gesture recipe without panel-state verification.",
+            verification="best_effort",
+        )
+    output_result(None, u2_code, extra=extra)
 
 
 @click.command("open-url")

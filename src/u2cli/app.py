@@ -10,6 +10,23 @@ import click
 from u2cli.device import connect_backend, output_result
 
 
+def _harmony_partial_extra(note: str) -> dict[str, object]:
+    return {
+        "partial": True,
+        "support_level": "partial",
+        "note": note,
+    }
+
+
+def _ensure_harmony_app_artifact_supported(backend, command_name: str) -> None:
+    if getattr(backend, "platform", None) == "harmony":
+        raise click.ClickException(
+            f"{command_name} is not yet supported on Harmony: the current CLI has not normalized the artifact model "
+            "between Android APK flows and Harmony HAP/package flows, so install/uninstall remains gated until the "
+            "Stage-3-style app service lands."
+        )
+
+
 @click.command("app-start")
 @click.option("--activity", default=None, help="Specific activity/ability to launch when supported")
 @click.option("--wait", is_flag=True, default=False, help="Wait for app to launch")
@@ -72,6 +89,7 @@ def cmd_app_install(apk):
     """Install an app package from a local path or URL."""
     u2_code = f"d.app_install({apk!r})"
     backend = connect_backend()
+    _ensure_harmony_app_artifact_supported(backend, "app-install")
     backend.app_install(apk)
     output_result(None, u2_code)
 
@@ -82,6 +100,7 @@ def cmd_app_uninstall(package):
     """Uninstall an app by package/bundle identifier."""
     u2_code = f"d.app_uninstall({package!r})"
     backend = connect_backend()
+    _ensure_harmony_app_artifact_supported(backend, "app-uninstall")
     result = backend.app_uninstall(package)
     output_result(result, u2_code)
 
@@ -93,7 +112,13 @@ def cmd_app_info(package):
     u2_code = f"d.app_info({package!r})"
     backend = connect_backend()
     info = backend.app_info(package)
-    output_result(info, u2_code)
+    extra = None
+    if getattr(backend, "platform", None) == "harmony":
+        extra = _harmony_partial_extra(
+            "Harmony app-info currently returns a pre-normalized compatibility payload; the unified app service "
+            "schema is still pending."
+        )
+    output_result(info, u2_code, extra=extra)
 
 
 @click.command("app-list")
@@ -111,7 +136,13 @@ def cmd_app_list(pkg_filter):
         u2_code = "d.app_list()"
     backend = connect_backend()
     packages = backend.app_list(pkg_filter)
-    output_result(packages, u2_code)
+    extra = None
+    if getattr(backend, "platform", None) == "harmony":
+        extra = _harmony_partial_extra(
+            "Harmony app-list currently exposes a pre-normalized compatibility view and may differ from the final "
+            "cross-platform app inventory semantics."
+        )
+    output_result(packages, u2_code, extra=extra)
 
 
 @click.command("app-list-running")
@@ -120,7 +151,13 @@ def cmd_app_list_running():
     u2_code = "d.app_list_running()"
     backend = connect_backend()
     packages = backend.app_list_running()
-    output_result(packages, u2_code)
+    extra = None
+    if getattr(backend, "platform", None) == "harmony":
+        extra = _harmony_partial_extra(
+            "Harmony app-list-running currently reports a reduced compatibility view rather than a normalized running "
+            "app model."
+        )
+    output_result(packages, u2_code, extra=extra)
 
 
 @click.command("app-wait")

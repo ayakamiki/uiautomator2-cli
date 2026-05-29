@@ -421,13 +421,19 @@ def test_media_control_command_harmony_fast_path_surfaces_unavailable_error_with
     mock_connect_backend.assert_not_called()
 
 
-def test_xpath_service_uses_backend_xpath_api():
-    locator_handle = Mock()
-    locator_handle.get_text.return_value = "Login"
-    locator_handle.exists.return_value = True
+def test_xpath_service_uses_normalized_hierarchy_queries():
+    element_handle = Mock()
     backend = Mock()
     backend.platform = "android"
-    backend.locate.return_value = locator_handle
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="android.widget.FrameLayout">'
+        '<node class="android.widget.Button" text="Login" resource-id="com.demo:id/login" bounds="[10,20][110,60]" clickable="true" />'
+        '<node class="android.widget.EditText" text="hello field" resource-id="com.demo:id/input" bounds="[20,80][220,140]" clickable="true" focused="true" />'
+        "</node>"
+        "</hierarchy>"
+    )
+    backend.select.return_value = element_handle
 
     service = create_xpath_service(backend)
 
@@ -436,17 +442,84 @@ def test_xpath_service_uses_backend_xpath_api():
     assert service.exists("%Login%") is True
     service.set_text("hello%", "hello")
 
-    backend.locate.assert_any_call("xpath", "//*[@resource-id='com.demo:id/login']")
-    backend.locate.assert_any_call("xpath", "//Button")
-    backend.locate.assert_any_call("xpath", "//*[contains(@text, 'Login') or contains(@content-desc, 'Login')]")
-    backend.locate.assert_any_call(
-        "xpath",
-        "//*[starts-with(@text, 'hello') or starts-with(@content-desc, 'hello')]",
+    backend.click.assert_called_once_with(60, 40)
+    backend.select.assert_called_once_with(
+        {
+            "resourceId": "com.demo:id/input",
+            "className": "android.widget.EditText",
+            "text": "hello field",
+        }
     )
-    locator_handle.click.assert_called_once_with(timeout=2.5)
-    locator_handle.get_text.assert_called_once_with()
-    locator_handle.exists.assert_called_once_with()
-    locator_handle.set_text.assert_called_once_with("hello")
+    element_handle.set_text.assert_called_once_with("hello", timeout=0.0)
+
+
+def test_xpath_service_sets_text_via_click_delete_and_send_keys_on_harmony_richeditor():
+    backend = Mock()
+    backend.platform = "harmony"
+    backend.backend_name = "mock-harmony"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="Root">'
+        '<node class="RichEditor" text="388327" resource-id="title_area_NoteEditorManager" bounds="[10,20][210,80]" clickable="true" />'
+        '<node class="RichEditor" text="388327" resource-id="content_area_NoteEditorManager" bounds="[20,120][220,220]" clickable="true" />'
+        "</node>"
+        "</hierarchy>"
+    )
+
+    service = create_xpath_service(backend)
+
+    service.set_text("//RichEditor[@resource-id='content_area_NoteEditorManager']", "hello")
+
+    backend.click.assert_called_once_with(210, 136)
+    assert backend.press.call_count == len("388327")
+    backend.press.assert_called_with("delete")
+    backend.send_keys.assert_called_once_with("hello", clear=False)
+    backend.select.assert_not_called()
+
+
+def test_xpath_service_sets_text_via_click_delete_and_send_keys_on_harmony_textinput():
+    backend = Mock()
+    backend.platform = "harmony"
+    backend.backend_name = "mock-harmony"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="Root">'
+        '<node class="TextInput" text="existing" resource-id="content_input" bounds="[20,120][220,220]" clickable="true" />'
+        "</node>"
+        "</hierarchy>"
+    )
+
+    service = create_xpath_service(backend)
+
+    service.set_text("//TextInput[@resource-id='content_input']", "hello")
+
+    backend.click.assert_called_once_with(210, 136)
+    assert backend.press.call_count == len("existing")
+    backend.press.assert_called_with("delete")
+    backend.send_keys.assert_called_once_with("hello", clear=False)
+    backend.select.assert_not_called()
+
+
+def test_xpath_service_keeps_generic_click_and_send_keys_path_for_other_harmony_nodes():
+    backend = Mock()
+    backend.platform = "harmony"
+    backend.backend_name = "mock-harmony"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="Root">'
+        '<node class="SearchChip" text="existing" resource-id="content_input" bounds="[20,120][220,220]" clickable="true" />'
+        "</node>"
+        "</hierarchy>"
+    )
+
+    service = create_xpath_service(backend)
+
+    service.set_text("//SearchChip[@resource-id='content_input']", "hello")
+
+    backend.click.assert_called_once_with(120, 170)
+    backend.send_keys.assert_called_once_with("hello", clear=True)
+    backend.press.assert_not_called()
+    backend.select.assert_not_called()
 
 
 def test_xpath_service_exposes_harmony_locator_mapping():
@@ -506,6 +579,22 @@ def test_xpath_commands_use_service():
     xpath_service.exists.assert_called_once_with("//Button")
     xpath_service.set_text.assert_called_once_with("//Button", "hello")
     assert mock_output.call_count == 4
+
+
+def test_xpath_commands_run_on_harmony_once_normalized_service_is_available():
+    runner = CliRunner()
+    backend = SimpleNamespace(platform="harmony")
+    xpath_service = Mock()
+
+    with patch("u2cli.element.connect_backend", return_value=backend), patch(
+        "u2cli.element.create_xpath_service", return_value=xpath_service
+    ) as mock_factory, patch("u2cli.element.output_result") as mock_output:
+        result = runner.invoke(cmd_xpath_click, ["//Button"])
+
+    assert result.exit_code == 0
+    mock_factory.assert_called_once_with(backend)
+    xpath_service.click.assert_called_once_with("//Button", timeout=3.0)
+    mock_output.assert_called_once_with(None, "d.xpath('//Button').click(timeout=3.0)")
 
 
 def test_screen_commands_use_backend_api(tmp_path):
@@ -630,6 +719,71 @@ def test_dump_hierarchy_command_uses_service(tmp_path):
     mock_output.assert_called_once()
 
 
+def test_harmony_dump_hierarchy_command_uses_normalized_output_without_partial_marker():
+    runner = CliRunner()
+    backend = SimpleNamespace(platform="harmony")
+    hierarchy_service = Mock()
+    hierarchy_service.dump.return_value = SimpleNamespace(content="tree", raw_xml="<hierarchy />")
+
+    with patch("u2cli.screen.connect_backend", return_value=backend), patch(
+        "u2cli.screen.create_hierarchy_service", return_value=hierarchy_service
+    ), patch("u2cli.screen.output_result") as mock_output:
+        result = runner.invoke(cmd_dump_hierarchy, [])
+
+    assert result.exit_code == 0
+    mock_output.assert_called_once_with("tree", "d.dump_hierarchy()")
+
+
+def test_xpath_service_supports_normalized_full_xpath_predicates_and_positions():
+    backend = Mock()
+    backend.platform = "harmony"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="RootLayout">'
+        '<node class="Button" text="Login" content-desc="Primary action" resource-id="entry.login.primary" bounds="[0,0][50,50]" clickable="true" />'
+        '<node class="Button" text="Login" content-desc="Secondary action" resource-id="entry.login.secondary" bounds="[60,0][110,50]" clickable="true" />'
+        "</node>"
+        "</hierarchy>"
+    )
+
+    service = create_xpath_service(backend)
+
+    assert service.get_text("//Button[contains(@content-desc, 'Primary')]") == "Login"
+    assert service.exists("//Button[@resource-id='entry.login.secondary'][1]") is True
+    service.click("//Button[@text='Login'][2]")
+
+    backend.click.assert_called_once_with(85, 25)
+
+
+def test_harmony_system_panel_commands_mark_best_effort_support():
+    runner = CliRunner()
+    backend = Mock()
+    backend.platform = "harmony"
+
+    with patch("u2cli.screen.connect_backend", return_value=backend), patch(
+        "u2cli.screen.output_result"
+    ) as mock_output:
+        notification_result = runner.invoke(cmd_open_notification, [])
+        quick_settings_result = runner.invoke(cmd_open_quick_settings, [])
+
+    assert notification_result.exit_code == 0
+    assert quick_settings_result.exit_code == 0
+    backend.open_notification.assert_called_once_with()
+    backend.open_quick_settings.assert_called_once_with()
+    assert mock_output.call_args_list[0].kwargs["extra"] == {
+        "partial": True,
+        "support_level": "partial",
+        "note": "Harmony open-notification currently uses a best-effort gesture recipe without panel-state verification.",
+        "verification": "best_effort",
+    }
+    assert mock_output.call_args_list[1].kwargs["extra"] == {
+        "partial": True,
+        "support_level": "partial",
+        "note": "Harmony open-quick-settings currently uses a best-effort gesture recipe without panel-state verification.",
+        "verification": "best_effort",
+    }
+
+
 def test_app_commands_use_backend_api():
     runner = CliRunner()
     backend = Mock()
@@ -669,3 +823,50 @@ def test_app_commands_use_backend_api():
     backend.app_list_running.assert_called_once_with()
     backend.app_wait.assert_called_once_with("com.demo", timeout=20.0, front=True)
     assert mock_output.call_count == 9
+
+
+def test_harmony_app_install_and_uninstall_are_gated_until_artifact_model_is_normalized():
+    runner = CliRunner()
+    backend = SimpleNamespace(platform="harmony")
+
+    with patch("u2cli.app.connect_backend", return_value=backend):
+        install_result = runner.invoke(cmd_app_install, ["demo.hap"])
+        uninstall_result = runner.invoke(cmd_app_uninstall, ["com.demo.app"])
+
+    assert install_result.exit_code != 0
+    assert uninstall_result.exit_code != 0
+    assert "app-install is not yet supported on Harmony" in install_result.output
+    assert "app-uninstall is not yet supported on Harmony" in uninstall_result.output
+
+
+def test_harmony_app_metadata_commands_mark_results_partial():
+    runner = CliRunner()
+    backend = Mock()
+    backend.platform = "harmony"
+    backend.app_info.return_value = {"name": "Demo"}
+    backend.app_list.return_value = ["com.demo.app"]
+    backend.app_list_running.return_value = ["com.demo.app"]
+
+    with patch("u2cli.app.connect_backend", return_value=backend), patch("u2cli.app.output_result") as mock_output:
+        info_result = runner.invoke(cmd_app_info, ["com.demo.app"])
+        list_result = runner.invoke(cmd_app_list, [])
+        running_result = runner.invoke(cmd_app_list_running, [])
+
+    assert info_result.exit_code == 0
+    assert list_result.exit_code == 0
+    assert running_result.exit_code == 0
+    assert mock_output.call_args_list[0].kwargs["extra"] == {
+        "partial": True,
+        "support_level": "partial",
+        "note": "Harmony app-info currently returns a pre-normalized compatibility payload; the unified app service schema is still pending.",
+    }
+    assert mock_output.call_args_list[1].kwargs["extra"] == {
+        "partial": True,
+        "support_level": "partial",
+        "note": "Harmony app-list currently exposes a pre-normalized compatibility view and may differ from the final cross-platform app inventory semantics.",
+    }
+    assert mock_output.call_args_list[2].kwargs["extra"] == {
+        "partial": True,
+        "support_level": "partial",
+        "note": "Harmony app-list-running currently reports a reduced compatibility view rather than a normalized running app model.",
+    }

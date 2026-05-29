@@ -1,11 +1,20 @@
 """Service-layer helpers for higher-level cross-platform features."""
 
-from u2cli.services.hierarchy import HierarchyDump, HierarchyService, create_hierarchy_service
+from u2cli.services.hierarchy import (
+	HierarchyDump,
+	HierarchyService,
+	HierarchySnapshot,
+	UiBounds,
+	UiNode,
+	UiNodeRef,
+	create_hierarchy_service,
+)
 from u2cli.services.xpath import (
 	ANDROID_XPATH_BOUNDARY,
 	HARMONY_LOCATOR_BOUNDARY,
 	HARMONY_REQUIRED_LOCATOR_STRATEGIES,
 	LocatorCapabilityBoundary,
+	NormalizedXPathEvaluator,
 	ParsedXPath,
 	ResolvedLocator,
 	XPathService,
@@ -18,10 +27,15 @@ from u2cli.services.xpath import (
 __all__ = [
 	"HierarchyDump",
 	"HierarchyService",
+	"HierarchySnapshot",
+	"UiBounds",
+	"UiNode",
+	"UiNodeRef",
 	"ANDROID_XPATH_BOUNDARY",
 	"HARMONY_LOCATOR_BOUNDARY",
 	"HARMONY_REQUIRED_LOCATOR_STRATEGIES",
 	"LocatorCapabilityBoundary",
+	"NormalizedXPathEvaluator",
 	"ParsedXPath",
 	"ResolvedLocator",
 	"XPathService",

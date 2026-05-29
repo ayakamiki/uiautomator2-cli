@@ -20,6 +20,13 @@ from u2cli.transports.hdc import connect_harmony_driver, resolve_default_target
 _DEVICE_CACHE: dict[str, AutomationBackend] = {}
 _DEFAULT_DEVICE_SERIAL: Optional[str] = None
 _LOGGER = logging.getLogger("u2cli.device")
+_HARMONY_TRANSIENT_CONNECT_ERROR_MARKERS = (
+    "device not founded or connected",
+    "communication channel is being established",
+    "[e000004]",
+    "hdc forward port error",
+    "no devices found. please connect a device.",
+)
 
 
 def _cache_key(platform: str, serial: Optional[str]) -> str:
@@ -98,6 +105,11 @@ def has_cached_backend(serial: Optional[str] = None, platform: Optional[str] = N
     return _cache_key(resolved_platform, cache_serial) in _DEVICE_CACHE
 
 
+def _is_harmony_transient_connect_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(marker in message for marker in _HARMONY_TRANSIENT_CONNECT_ERROR_MARKERS)
+
+
 def connect_backend(serial: Optional[str] = None, platform: Optional[str] = None) -> AutomationBackend:
     """Connect to a backend-aware device wrapper.
 
@@ -111,7 +123,10 @@ def connect_backend(serial: Optional[str] = None, platform: Optional[str] = None
     cache_serial = requested_serial
 
     # Daemon mode retries once to handle transient ADB/transport hiccups.
-    max_attempts = 2 if os.getenv("U2CLI_IN_DAEMON") == "1" else 1
+    # Harmony non-daemon commands also get one retry, but only for known transient
+    # HDC / UITest channel-establishment failures.
+    in_daemon = os.getenv("U2CLI_IN_DAEMON") == "1"
+    max_attempts = 2 if in_daemon or requested_platform == "harmony" else 1
     last_error: Optional[Exception] = None
 
     for attempt in range(1, max_attempts + 1):
@@ -173,6 +188,20 @@ def connect_backend(serial: Optional[str] = None, platform: Optional[str] = None
                 e,
             )
             clear_cached_device(cache_serial, platform=requested_platform)
+
+            should_retry = in_daemon or (
+                requested_platform == "harmony" and _is_harmony_transient_connect_error(e)
+            )
+            if attempt >= max_attempts or not should_retry:
+                break
+
+            _LOGGER.info(
+                "retry connect after transient failure platform=%r device_id=%r attempt=%s/%s",
+                requested_platform,
+                selected_serial,
+                attempt + 1,
+                max_attempts,
+            )
 
     click.echo(
         json.dumps({"error": str(last_error), "type": type(last_error).__name__}, ensure_ascii=False),

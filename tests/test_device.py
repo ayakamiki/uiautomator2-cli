@@ -83,3 +83,30 @@ class ConnectDeviceTests(unittest.TestCase):
         self.assertEqual(backend.backend_name, "hmdriver2+hdc")
         self.assertIs(backend.raw_device(), connected_driver)
         mock_connect.assert_called_once_with("harmony", "HDC-DEVICE")
+
+    def test_connect_backend_retries_transient_harmony_connect_error_once_outside_daemon(self) -> None:
+        connected_driver = object()
+
+        with patch.dict("u2cli.device.os.environ", {}, clear=False), patch(
+            "u2cli.device._connect_raw_device",
+            side_effect=[RuntimeError("HDC forward port error: [Fail][E000004]: The communication channel is being established."), connected_driver],
+        ) as mock_connect:
+            backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+
+        self.assertEqual(backend.platform, "harmony")
+        self.assertIs(backend.raw_device(), connected_driver)
+        self.assertEqual(mock_connect.call_args_list, [call("harmony", "HDC-DEVICE"), call("harmony", "HDC-DEVICE")])
+
+    def test_connect_backend_does_not_retry_non_transient_harmony_connect_error_outside_daemon(self) -> None:
+        with patch.dict("u2cli.device.os.environ", {}, clear=False), patch(
+            "u2cli.device._connect_raw_device",
+            side_effect=RuntimeError("unsupported Harmony capability"),
+        ) as mock_connect, patch("u2cli.device.click.echo") as mock_echo:
+            with self.assertRaises(SystemExit) as exc:
+                device.connect_backend("HDC-DEVICE", platform="harmony")
+
+        self.assertEqual(exc.exception.code, 1)
+        self.assertEqual(mock_connect.call_args_list, [call("harmony", "HDC-DEVICE")])
+        payload = json.loads(mock_echo.call_args.args[0])
+        self.assertEqual(payload["type"], "RuntimeError")
+        self.assertIn("unsupported Harmony capability", payload["error"])
