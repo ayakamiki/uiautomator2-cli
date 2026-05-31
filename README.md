@@ -303,7 +303,7 @@ The Harmony backend surface is intentionally narrower than the raw backend inter
 - Shared selector-based element commands such as `click`, `long-click`, `get-text`, `set-text`, `clear-text`, and `exists` are supported.
 - `xpath-*` now runs through the normalized hierarchy/XPath service on Harmony instead of the earlier backend-native locator bridge.
 - `dump-hierarchy` now renders from the normalized hierarchy model on Harmony. `--raw` still returns backend XML when you need the original payload.
-- `open-notification` and `open-quick-settings` are currently partial best-effort gesture recipes on Harmony. They do not yet verify panel-open state.
+- `open-notification` and `open-quick-settings` are currently partial best-effort gesture recipes on Harmony. `open-notification` retries with a stronger follow-up swipe when the post-gesture hierarchy still looks like the desktop, but neither command yet performs strict panel-open verification.
 - `app-install` and `app-uninstall` are currently gated on Harmony until the app artifact model is normalized across Android APK and Harmony package/HAP flows.
 - `app-info`, `app-list`, and `app-list-running` are currently partial compatibility views on Harmony rather than the final normalized app-service schema.
 
@@ -377,7 +377,7 @@ Locator-based element actions backed by the normalized hierarchy/XPath service.
 
 Harmony notes for partially exposed screen/device commands:
 
-- `open-notification`: partial best-effort Harmony gesture recipe without panel verification.
+- `open-notification`: partial best-effort Harmony gesture recipe with desktop-state retry, but without strict panel verification.
 - `open-quick-settings`: partial best-effort Harmony gesture recipe without panel verification.
 
 `press KEY` accepts integer keycodes on every backend. For named keys, the shared documented set is

@@ -81,6 +81,12 @@ _HARMONY_MEDIA_CONTROL_UNAVAILABLE_MARKERS = (
     "unrecognized option",
     "device not founded or connected",
 )
+_HARMONY_DESKTOP_HIERARCHY_MARKERS = (
+    "SCBDesktop_",
+    "GridSwiper",
+    "SwiperPage_Grid",
+    "AppIconCommonView",
+)
 
 
 def _bounds_center(bounds: str) -> tuple[int, int]:
@@ -182,6 +188,21 @@ def _extract_current_app_from_hierarchy(hierarchy: Any) -> Optional[dict[str, st
         return {"package": str(bundle_name), "activity": str(activity_name) if activity_name else None}
 
     return None
+
+
+def _looks_like_harmony_desktop(hierarchy: Any) -> bool:
+    if not isinstance(hierarchy, dict):
+        return False
+
+    for node in _walk_hierarchy(hierarchy):
+        attributes = node.get("attributes", {})
+        for value in attributes.values():
+            if value is None:
+                continue
+            text = str(value)
+            if any(marker in text for marker in _HARMONY_DESKTOP_HIERARCHY_MARKERS):
+                return True
+    return False
 
 
 class HarmonyHmElement:
@@ -584,6 +605,24 @@ def _swipe_from_top_edge(device: Any, *, x_ratio: float, end_y_ratio: float = 0.
     start_y = max(1, int(height * 0.02))
     end_y = int(height * end_y_ratio)
     _call_first(device, ("swipe",), x, start_y, x, end_y)
+
+
+def _open_harmony_system_panel(device: Any, *, x_ratio: float) -> None:
+    swipe_profiles = (0.72, 0.86)
+
+    for index, end_y_ratio in enumerate(swipe_profiles):
+        _swipe_from_top_edge(device, x_ratio=x_ratio, end_y_ratio=end_y_ratio)
+        if index == len(swipe_profiles) - 1:
+            return
+
+        time.sleep(0.15)
+        try:
+            hierarchy = _call_first(device, ("dump_hierarchy",))
+        except Exception:
+            return
+
+        if not _looks_like_harmony_desktop(hierarchy):
+            return
 
 
 class HarmonyHmBackend:
@@ -1093,7 +1132,7 @@ class HarmonyHmBackend:
 
     def open_notification(self) -> None:
         # Harmony commonly splits notification shade (left) and control center (right).
-        _swipe_from_top_edge(self._device, x_ratio=0.2)
+        _open_harmony_system_panel(self._device, x_ratio=0.2)
 
     def open_quick_settings(self) -> None:
         _swipe_from_top_edge(self._device, x_ratio=0.8)

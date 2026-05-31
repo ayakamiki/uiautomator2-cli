@@ -110,3 +110,35 @@ class ConnectDeviceTests(unittest.TestCase):
         payload = json.loads(mock_echo.call_args.args[0])
         self.assertEqual(payload["type"], "RuntimeError")
         self.assertIn("unsupported Harmony capability", payload["error"])
+
+    def test_connect_backend_reconnects_when_cached_harmony_backend_probe_hits_transport_error_in_daemon(self) -> None:
+        first_driver = object()
+        second_driver = object()
+
+        with patch.dict("u2cli.device.os.environ", {"U2CLI_IN_DAEMON": "1"}, clear=False), patch(
+            "u2cli.device._connect_raw_device",
+            side_effect=[first_driver, second_driver],
+        ) as mock_connect:
+            first_backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+            first_backend.window_size = lambda: (_ for _ in ()).throw(RuntimeError("broken pipe"))
+
+            refreshed_backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+
+        self.assertIsNot(first_backend, refreshed_backend)
+        self.assertIs(refreshed_backend.raw_device(), second_driver)
+        self.assertEqual(mock_connect.call_args_list, [call("harmony", "HDC-DEVICE"), call("harmony", "HDC-DEVICE")])
+
+    def test_connect_backend_keeps_cached_harmony_backend_when_probe_error_is_not_transport_like_in_daemon(self) -> None:
+        connected_driver = object()
+
+        with patch.dict("u2cli.device.os.environ", {"U2CLI_IN_DAEMON": "1"}, clear=False), patch(
+            "u2cli.device._connect_raw_device",
+            return_value=connected_driver,
+        ) as mock_connect:
+            backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+            backend.window_size = lambda: (_ for _ in ()).throw(RuntimeError("unsupported Harmony capability"))
+
+            cached_backend = device.connect_backend("HDC-DEVICE", platform="harmony")
+
+        self.assertIs(backend, cached_backend)
+        self.assertEqual(mock_connect.call_args_list, [call("harmony", "HDC-DEVICE")])

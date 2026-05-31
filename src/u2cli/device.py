@@ -27,6 +27,12 @@ _HARMONY_TRANSIENT_CONNECT_ERROR_MARKERS = (
     "hdc forward port error",
     "no devices found. please connect a device.",
 )
+_HARMONY_STALE_BACKEND_ERROR_MARKERS = _HARMONY_TRANSIENT_CONNECT_ERROR_MARKERS + (
+    "broken pipe",
+    "connection reset",
+    "timed out",
+    "connection refused",
+)
 
 
 def _cache_key(platform: str, serial: Optional[str]) -> str:
@@ -110,6 +116,24 @@ def _is_harmony_transient_connect_error(error: Exception) -> bool:
     return any(marker in message for marker in _HARMONY_TRANSIENT_CONNECT_ERROR_MARKERS)
 
 
+def _is_harmony_stale_backend_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(marker in message for marker in _HARMONY_STALE_BACKEND_ERROR_MARKERS)
+
+
+def _can_reuse_cached_harmony_backend(backend: AutomationBackend) -> bool:
+    try:
+        backend.window_size()
+        return True
+    except Exception as error:
+        if _is_harmony_stale_backend_error(error):
+            _LOGGER.warning("cached Harmony backend probe failed with transport-like error=%s", error)
+            return False
+
+        _LOGGER.warning("cached Harmony backend probe failed with non-transport error; keep backend error=%s", error)
+        return True
+
+
 def connect_backend(serial: Optional[str] = None, platform: Optional[str] = None) -> AutomationBackend:
     """Connect to a backend-aware device wrapper.
 
@@ -142,6 +166,11 @@ def connect_backend(serial: Optional[str] = None, platform: Optional[str] = None
                     selected_serial = _current_unique_serial("harmony")
 
             cached = _DEVICE_CACHE.get(_cache_key(requested_platform, cache_serial))
+            if cached is not None:
+                if requested_platform == "harmony" and in_daemon and not _can_reuse_cached_harmony_backend(cached):
+                    clear_cached_device(cache_serial, platform=requested_platform)
+                    cached = None
+
             if cached is not None:
                 _LOGGER.info(
                     "use cached backend platform=%r device_id=%r requested_serial=%r selected_serial=%r cache_serial=%r",

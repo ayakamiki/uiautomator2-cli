@@ -273,7 +273,7 @@ def cmd_open_notification():
     extra = None
     if getattr(backend, "platform", None) == "harmony":
         extra = _harmony_partial_extra(
-            "Harmony open-notification currently uses a best-effort gesture recipe without panel-state verification.",
+            "Harmony open-notification currently uses a best-effort gesture recipe with desktop-state retry, but without strict panel-state verification.",
             verification="best_effort",
         )
     output_result(None, u2_code, extra=extra)

@@ -385,6 +385,26 @@ def test_harmony_backend_open_notification_and_quick_settings_use_split_top_swip
     assert ("swipe", (864, 48, 864, 1728)) in device.calls
 
 
+def test_harmony_backend_open_notification_retries_with_stronger_swipe_when_hierarchy_still_looks_like_desktop():
+    device = FakeHarmonyDevice()
+    device.dump_hierarchy = Mock(
+        side_effect=[
+            {
+                "attributes": {"id": "SCBDesktop_Flex_Desktop", "type": "Flex"},
+                "children": [],
+            }
+        ]
+    )
+    backend = HarmonyHmBackend(device=device, serial="HDC-1")
+
+    with patch("u2cli.backends.harmony_hm.time.sleep") as mock_sleep:
+        backend.open_notification()
+
+    assert ("swipe", (216, 48, 216, 1728)) in device.calls
+    assert ("swipe", (216, 48, 216, 2064)) in device.calls
+    mock_sleep.assert_called_once_with(0.15)
+
+
 def test_harmony_backend_open_url_uses_driver_helper_when_available():
     device = FakeHarmonyDevice()
     backend = HarmonyHmBackend(device=device, serial="HDC-1")

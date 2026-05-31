@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import time
+from functools import wraps
 from typing import Optional
 
 
@@ -79,11 +80,64 @@ def run_hdc_shell(command_argv: list[str], *, serial: Optional[str] = None, time
 def _load_hmdriver2_driver() -> type:
     try:
         from hmdriver2.driver import Driver
+        from hmdriver2._client import HmClient
     except ImportError as exc:
         raise RuntimeError(
             "Harmony support requires hmdriver2. Install the optional dependency set with: pip install 'uiautomator2-cli[harmony]'"
         ) from exc
+    _install_hmdriver2_client_release_guard(HmClient)
+    _install_hmdriver2_driver_del_guard(Driver)
     return Driver
+
+
+def _reset_hmdriver2_client_runtime_state(client: object) -> None:
+    client_dict = getattr(client, "__dict__", None)
+    if not isinstance(client_dict, dict):
+        return
+
+    # hmdriver2 caches the forwarded local port via cached_property. Clear it
+    # after release so any later restart on the same client recomputes fport.
+    client_dict.pop("local_port", None)
+
+
+def _install_hmdriver2_client_release_guard(HmClient: type) -> None:
+    release = getattr(HmClient, "release", None)
+    if not callable(release) or getattr(release, "_u2cli_port_reset_guard", False):
+        return
+
+    @wraps(release)
+    def guarded_release(self, *args, **kwargs):
+        try:
+            return release(self, *args, **kwargs)
+        finally:
+            _reset_hmdriver2_client_runtime_state(self)
+
+    guarded_release._u2cli_port_reset_guard = True
+    HmClient.release = guarded_release
+
+
+def _install_hmdriver2_driver_del_guard(Driver: type) -> None:
+    destructor = getattr(Driver, "__del__", None)
+    if not callable(destructor) or getattr(destructor, "_u2cli_scoped_del_guard", False):
+        return
+
+    @wraps(destructor)
+    def guarded_del(self, *args, **kwargs):
+        instances = getattr(Driver, "_instance", None)
+        serial = getattr(self, "serial", None)
+        if isinstance(instances, dict) and serial is not None and instances.get(serial) is self:
+            instances.pop(serial, None)
+
+        client = getattr(self, "_client", None)
+        release = getattr(client, "release", None)
+        if callable(release):
+            try:
+                release()
+            finally:
+                _reset_hmdriver2_client_runtime_state(client)
+
+    guarded_del._u2cli_scoped_del_guard = True
+    Driver.__del__ = guarded_del
 
 
 def _reset_hmdriver2_driver_instance(Driver: type, serial: str) -> None:
@@ -98,7 +152,10 @@ def _reset_hmdriver2_driver_instance(Driver: type, serial: str) -> None:
     client = getattr(cached, "_client", None)
     release = getattr(client, "release", None)
     if callable(release):
-        release()
+        try:
+            release()
+        finally:
+            _reset_hmdriver2_client_runtime_state(client)
 
 
 def _is_harmony_target_missing_error(error: Exception) -> bool:

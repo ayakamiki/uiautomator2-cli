@@ -1,7 +1,14 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from u2cli.transports.hdc import connect_harmony_driver, run_hdc_shell, _wait_for_harmony_target
+from u2cli.transports.hdc import (
+    _install_hmdriver2_client_release_guard,
+    _install_hmdriver2_driver_del_guard,
+    _reset_hmdriver2_driver_instance,
+    connect_harmony_driver,
+    run_hdc_shell,
+    _wait_for_harmony_target,
+)
 
 
 def test_run_hdc_shell_respects_hdc_bin_env_and_serial():
@@ -55,6 +62,61 @@ def test_connect_harmony_driver_releases_stale_driver_singleton_before_reconnect
     assert driver is not stale_driver
     assert driver.serial == "HDC-1"
     assert FakeDriver._instance["HDC-1"] is driver
+
+
+def test_reset_hmdriver2_driver_instance_clears_cached_client_local_port():
+    class FakeDriver:
+        _instance = {}
+
+    stale_client = SimpleNamespace(local_port=10000, release=Mock())
+    stale_driver = SimpleNamespace(serial="HDC-1", _client=stale_client)
+    FakeDriver._instance["HDC-1"] = stale_driver
+
+    _reset_hmdriver2_driver_instance(FakeDriver, "HDC-1")
+
+    stale_client.release.assert_called_once_with()
+    assert "local_port" not in stale_client.__dict__
+    assert "HDC-1" not in FakeDriver._instance
+
+
+def test_install_hmdriver2_client_release_guard_resets_cached_local_port():
+    class FakeHmClient:
+        def release(self):
+            self.release_count = getattr(self, "release_count", 0) + 1
+
+    _install_hmdriver2_client_release_guard(FakeHmClient)
+
+    client = FakeHmClient()
+    client.local_port = 10000
+
+    client.release()
+
+    assert client.release_count == 1
+    assert "local_port" not in client.__dict__
+
+
+def test_install_hmdriver2_driver_del_guard_scopes_instance_cleanup_to_own_serial():
+    class FakeDriver:
+        _instance = {}
+
+        def __del__(self):
+            type(self)._instance.clear()
+
+    _install_hmdriver2_driver_del_guard(FakeDriver)
+
+    client_a = SimpleNamespace(local_port=10000, release=Mock())
+    client_b = SimpleNamespace(local_port=10001, release=Mock())
+    driver_a = SimpleNamespace(serial="HDC-A", _client=client_a)
+    driver_b = SimpleNamespace(serial="HDC-B", _client=client_b)
+    FakeDriver._instance["HDC-A"] = driver_a
+    FakeDriver._instance["HDC-B"] = driver_b
+
+    FakeDriver.__del__(driver_a)
+
+    client_a.release.assert_called_once_with()
+    client_b.release.assert_not_called()
+    assert "local_port" not in client_a.__dict__
+    assert FakeDriver._instance == {"HDC-B": driver_b}
 
 
 def test_wait_for_harmony_target_retries_until_serial_reappears():

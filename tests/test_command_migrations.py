@@ -773,7 +773,7 @@ def test_harmony_system_panel_commands_mark_best_effort_support():
     assert mock_output.call_args_list[0].kwargs["extra"] == {
         "partial": True,
         "support_level": "partial",
-        "note": "Harmony open-notification currently uses a best-effort gesture recipe without panel-state verification.",
+        "note": "Harmony open-notification currently uses a best-effort gesture recipe with desktop-state retry, but without strict panel-state verification.",
         "verification": "best_effort",
     }
     assert mock_output.call_args_list[1].kwargs["extra"] == {
