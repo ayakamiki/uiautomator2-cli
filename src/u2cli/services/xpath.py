@@ -87,6 +87,9 @@ class XPathService(Protocol):
     def set_text(self, expression: str, text: str) -> None:
         """Set text on an element resolved by XPath."""
 
+    def drag_and_drop(self, source_expression: str, target_expression: str, *, duration: float = 0.5) -> None:
+        """Drag an element resolved by XPath onto another resolved by XPath."""
+
 
 class BackendXPathService:
     """XPath service backed by an automation backend."""
@@ -119,6 +122,17 @@ class BackendXPathService:
         if not nodes:
             raise RuntimeError("element not found")
         self._set_text_on_node(nodes[0], text)
+
+    def drag_and_drop(self, source_expression: str, target_expression: str, *, duration: float = 0.5) -> None:
+        source_nodes = self._query_nodes(source_expression)
+        if not source_nodes:
+            raise RuntimeError("source element not found")
+
+        target_nodes = self._query_nodes(target_expression)
+        if not target_nodes:
+            raise RuntimeError("target element not found")
+
+        self._drag_node_to_node(source_nodes[0], target_nodes[0], duration=duration)
 
     def _query_nodes(self, expression: str, *, timeout: float = 0.0) -> list[UiNode]:
         parsed = parse_xpath_expression(expression)
@@ -176,6 +190,28 @@ class BackendXPathService:
             return
 
         raise RuntimeError("matched node is not actionable")
+
+    def _drag_node_to_node(self, source_node: UiNode, target_node: UiNode, *, duration: float) -> None:
+        if node_is_drop_surface(target_node):
+            if source_node.bounds is not None and target_node.bounds is not None:
+                start_x, start_y = source_node.bounds.center
+                end_x, end_y = target_node.bounds.center
+                self._backend.drag_and_drop(start_x, start_y, end_x, end_y, duration=duration)
+                return
+
+        if source_node.bounds is not None and target_node.bounds is not None:
+            start_x, start_y = source_node.bounds.center
+            end_x, end_y = target_node.bounds.center
+            self._backend.drag_and_drop(start_x, start_y, end_x, end_y, duration=duration)
+            return
+
+        source_selector = build_selector_from_node(source_node)
+        target_selector = build_selector_from_node(target_node)
+        if source_selector and target_selector:
+            self._backend.select(source_selector).drag_to(self._backend.select(target_selector), duration=duration)
+            return
+
+        raise RuntimeError("matched XPath nodes are not draggable")
 
 
 def parse_xpath_expression(expression: str) -> ParsedXPath:
@@ -347,6 +383,30 @@ def build_selector_from_node(node: UiNode) -> dict[str, object]:
     return selector
 
 
+def find_selector_node(snapshot: HierarchySnapshot, selector: dict[str, object]) -> UiNode | None:
+    """Resolve a CLI/backend selector to the best matching normalized node."""
+
+    matches = [node for node in _flatten_queryable_nodes(snapshot) if _selector_matches_node(node, selector)]
+    target_index = selector.get("instance")
+    if target_index is None:
+        target_index = selector.get("index", 0)
+    if not isinstance(target_index, int) or target_index < 0 or target_index >= len(matches):
+        return None
+    return matches[target_index]
+
+
+def node_is_drop_surface(node: UiNode) -> bool:
+    """Return whether a node behaves more like a drop surface/container than a concrete item target."""
+
+    if node.bounds is None:
+        return False
+
+    has_primary_content = bool(node.text or node.content_desc)
+    looks_structural = bool(node.children) or node.scrollable or not node.clickable
+    large_surface = node.bounds.area >= 200_000
+    return looks_structural and large_surface and not has_primary_content
+
+
 def query_snapshot(snapshot: HierarchySnapshot, parsed: ParsedXPath) -> list[UiNode]:
     """Query a normalized hierarchy snapshot using either shorthand or full XPath syntax."""
 
@@ -366,6 +426,51 @@ def query_snapshot(snapshot: HierarchySnapshot, parsed: ParsedXPath) -> list[UiN
     if parsed.kind == "text_startswith":
         return [node for node in nodes if any(value.startswith(parsed.value) for value in _node_match_values(node, include_resource_id=False))]
     return [node for node in nodes if any(value == parsed.value for value in _node_match_values(node))]
+
+
+def _selector_matches_node(node: UiNode, selector: dict[str, object]) -> bool:
+    text = node.text or ""
+    description = node.content_desc or ""
+    resource_id = node.resource_id or ""
+    package_name = node.package or ""
+
+    if "text" in selector and text != selector["text"]:
+        return False
+    if "textContains" in selector and str(selector["textContains"]) not in text:
+        return False
+    if "textMatches" in selector and not re.search(str(selector["textMatches"]), text):
+        return False
+    if "textStartsWith" in selector and not text.startswith(str(selector["textStartsWith"])):
+        return False
+    if "resourceId" in selector and resource_id != selector["resourceId"]:
+        return False
+    if "className" in selector and not _tag_matches(str(selector["className"]), node):
+        return False
+    if "description" in selector and description != selector["description"]:
+        return False
+    if "descriptionContains" in selector and str(selector["descriptionContains"]) not in description:
+        return False
+    if "descriptionMatches" in selector and not re.search(str(selector["descriptionMatches"]), description):
+        return False
+    if "descriptionStartsWith" in selector and not description.startswith(str(selector["descriptionStartsWith"])):
+        return False
+    if "packageName" in selector and package_name != selector["packageName"]:
+        return False
+
+    bool_fields = {
+        "checkable": node.checkable,
+        "checked": node.checked,
+        "clickable": node.clickable,
+        "scrollable": node.scrollable,
+        "enabled": node.enabled,
+        "focused": node.focused,
+        "selected": node.selected,
+    }
+    for key, actual in bool_fields.items():
+        if key in selector and bool(selector[key]) != actual:
+            return False
+
+    return True
 
 
 def parse_normalized_xpath(expression: str) -> list[XPathStep]:

@@ -30,6 +30,32 @@ class FakeHarmonyElement:
     def clear_text(self):
         self.driver.calls.append(("element_clear_text", self.kwargs))
 
+    def pinch_in(self, scale=0.5):
+        self.driver.calls.append(("element_pinch_in", self.kwargs, scale))
+
+    def pinch_out(self, scale=2.0):
+        self.driver.calls.append(("element_pinch_out", self.kwargs, scale))
+
+    def drag_to(self, target):
+        self.driver.calls.append(("element_drag_to", self.kwargs, target.kwargs))
+
+
+class FakeHarmonyGesture:
+    def __init__(self, driver):
+        self.driver = driver
+        self.steps = []
+
+    def start(self, x, y, interval=0.5):
+        self.steps.append(("start", x, y, interval))
+        return self
+
+    def move(self, x, y, interval=0.5):
+        self.steps.append(("move", x, y, interval))
+        return self
+
+    def action(self):
+        self.driver.calls.append(("gesture", list(self.steps)))
+
 
 class FakeHarmonyDevice:
     def __init__(self):
@@ -38,6 +64,7 @@ class FakeHarmonyDevice:
         self.current_app_result = (None, None)
         self.shell_outputs = {}
         self.app_info_payloads = {}
+        self.gesture = FakeHarmonyGesture(self)
 
     def __call__(self, **kwargs):
         self.calls.append(("select", kwargs))
@@ -412,6 +439,66 @@ def test_harmony_backend_open_url_uses_driver_helper_when_available():
     backend.open_url("https://example.com")
 
     assert ("open_url", "https://example.com") in device.calls
+
+
+def test_harmony_backend_drag_and_drop_uses_gesture_when_available():
+    device = FakeHarmonyDevice()
+    backend = HarmonyHmBackend(device=device, serial="HDC-1")
+
+    backend.drag_and_drop(10, 20, 30, 40, duration=0.6)
+
+    assert device.calls == [
+        (
+            "gesture",
+            [
+                ("start", 10, 20, 0.19999999999999998),
+                ("move", 30, 40, 0.6),
+            ],
+        )
+    ]
+
+
+def test_harmony_backend_zoom_targets_element_covering_center_point():
+    device = FakeHarmonyDevice()
+    backend = HarmonyHmBackend(device=device, serial="HDC-1")
+
+    backend.zoom(60, 40, percent=25)
+
+    assert device.calls[-2] == (
+        "select",
+        {
+            "text": "Login Now",
+            "description": "Login button",
+            "id": "entry.login",
+            "type": "Button",
+        },
+    )
+    assert device.calls[-1] == (
+        "element_pinch_out",
+        {
+            "text": "Login Now",
+            "description": "Login button",
+            "id": "entry.login",
+            "type": "Button",
+        },
+        1.25,
+    )
+
+
+def test_harmony_element_drag_to_uses_native_component_drag_to():
+    device = FakeHarmonyDevice()
+    backend = HarmonyHmBackend(device=device, serial="HDC-1")
+
+    source = backend.select({"text": "Login"})
+    target = backend.select({"resourceId": "entry.login"})
+
+    source.drag_to(target, duration=0.8)
+
+    assert device.calls[-1] == (
+        "element_drag_to",
+        {"text": "Login"},
+        {"id": "entry.login"},
+    )
 
 
 def test_harmony_backend_current_app_falls_back_to_aa_dump_foreground_parser():

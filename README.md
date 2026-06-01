@@ -334,6 +334,9 @@ Selector-based element actions shared across Android and Harmony.
 
 - `click`
 - `long-click`
+- `drag-and-drop-element`
+- `pinch-in`
+- `pinch-out`
 - `get-text`
 - `set-text`
 - `clear-text`
@@ -343,14 +346,20 @@ Selector-based element actions shared across Android and Harmony.
 - `swipe-element`
 - `scroll`
 
+`drag-and-drop-element` uses one source selector and one target selector in the same command.
+Target selector options use the `--target-*` prefix, for example `--target-text`, `--target-resource-id`, and `--target-description`.
+
 ### XPath Commands
 
 Locator-based element actions backed by the normalized hierarchy/XPath service.
 
 - `xpath-click`
+- `drag-and-drop-xpath`
 - `xpath-exists`
 - `xpath-get-text`
 - `xpath-set-text`
+
+`drag-and-drop-xpath SOURCE_LOCATOR TARGET_LOCATOR` resolves both locators through the normalized XPath service and drags the source node to the target node.
 
 ### Device/Screen Commands
 
@@ -368,12 +377,17 @@ Locator-based element actions backed by the normalized hierarchy/XPath service.
 - `click-coord`
 - `double-click`
 - `long-click-coord`
+- `drag-and-drop`
+- `zoom`
 - `send-keys`
 - `open-notification`
 - `open-quick-settings`
 - `open-url`
 - `shell`
 - `current-app`
+
+`zoom --center-x --center-y --percent` uses the UI element covering the given center point.
+Positive `--percent` zooms in, negative `--percent` zooms out, and `abs(percent)` must be between 1 and 100.
 
 Harmony notes for partially exposed screen/device commands:
 

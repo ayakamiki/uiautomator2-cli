@@ -32,10 +32,14 @@ from u2cli.daemon import (
 from u2cli.element import (
     cmd_click,
     cmd_clear_text,
+    cmd_drag_and_drop_element,
+    cmd_drag_and_drop_xpath,
     cmd_element_info,
     cmd_exists,
     cmd_get_text,
     cmd_long_click,
+    cmd_pinch_in,
+    cmd_pinch_out,
     cmd_scroll,
     cmd_set_text,
     cmd_swipe_element,
@@ -51,6 +55,7 @@ from u2cli.screen import (
     cmd_click_coord,
     cmd_current_app,
     cmd_device_info,
+    cmd_drag_and_drop,
     cmd_double_click,
     cmd_dump_hierarchy,
     cmd_long_click_coord,
@@ -70,6 +75,7 @@ from u2cli.screen import (
     cmd_swipe_ext,
     cmd_ui_info,
     cmd_window_size,
+    cmd_zoom,
 )
 
 # App commands
@@ -297,12 +303,16 @@ cli.add_command(cmd_wait, name="wait")
 cli.add_command(cmd_element_info, name="element-info")
 cli.add_command(cmd_swipe_element, name="swipe-element")
 cli.add_command(cmd_scroll, name="scroll")
+cli.add_command(cmd_drag_and_drop_element, name="drag-and-drop-element")
+cli.add_command(cmd_pinch_in, name="pinch-in")
+cli.add_command(cmd_pinch_out, name="pinch-out")
 
 # XPath commands
 cli.add_command(cmd_xpath_click, name="xpath-click")
 cli.add_command(cmd_xpath_exists, name="xpath-exists")
 cli.add_command(cmd_xpath_get_text, name="xpath-get-text")
 cli.add_command(cmd_xpath_set_text, name="xpath-set-text")
+cli.add_command(cmd_drag_and_drop_xpath, name="drag-and-drop-xpath")
 
 # ---------------------------------------------------------------------------
 # Device / screen commands
@@ -322,6 +332,8 @@ cli.add_command(cmd_swipe_ext, name="swipe-ext")
 cli.add_command(cmd_click_coord, name="click-coord")
 cli.add_command(cmd_double_click, name="double-click")
 cli.add_command(cmd_long_click_coord, name="long-click-coord")
+cli.add_command(cmd_drag_and_drop, name="drag-and-drop")
+cli.add_command(cmd_zoom, name="zoom")
 cli.add_command(cmd_send_keys, name="send-keys")
 cli.add_command(cmd_open_notification, name="open-notification")
 cli.add_command(cmd_open_quick_settings, name="open-quick-settings")

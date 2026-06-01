@@ -335,6 +335,9 @@ u2cli --platform harmony xpath-exists "//Button[@text='Login'][2]"
 
 - `click`
 - `long-click`
+- `drag-and-drop-element`
+- `pinch-in`
+- `pinch-out`
 - `get-text`
 - `set-text`
 - `clear-text`
@@ -344,14 +347,20 @@ u2cli --platform harmony xpath-exists "//Button[@text='Login'][2]"
 - `swipe-element`
 - `scroll`
 
+`drag-and-drop-element` 在同一条命令里同时接收源元素 selector 和目标元素 selector。
+目标元素参数统一使用 `--target-*` 前缀，例如 `--target-text`、`--target-resource-id`、`--target-description`。
+
 ### XPath 操作
 
 基于 locator 的元素操作，当前由 normalized hierarchy/XPath service 驱动。
 
 - `xpath-click`
+- `drag-and-drop-xpath`
 - `xpath-exists`
 - `xpath-get-text`
 - `xpath-set-text`
+
+`drag-and-drop-xpath SOURCE_LOCATOR TARGET_LOCATOR` 会先通过 normalized XPath service 解析源/目标 locator，再把源节点拖到目标节点。
 
 ### 设备/屏幕操作
 
@@ -369,12 +378,17 @@ u2cli --platform harmony xpath-exists "//Button[@text='Login'][2]"
 - `click-coord`
 - `double-click`
 - `long-click-coord`
+- `drag-and-drop`
+- `zoom`
 - `send-keys`
 - `open-notification`
 - `open-quick-settings`
 - `open-url`
 - `shell`
 - `current-app`
+
+`zoom --center-x --center-y --percent` 会以给定中心点命中的 UI 元素作为缩放目标。
+`--percent` 为正表示放大，为负表示缩小，`abs(percent)` 取值范围为 1 到 100。
 
 Harmony 上当前以 `partial` 暴露的设备/屏幕命令：
 

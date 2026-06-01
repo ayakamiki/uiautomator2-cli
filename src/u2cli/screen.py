@@ -26,6 +26,11 @@ def _harmony_partial_extra(note: str, **extra):
     payload.update(extra)
     return payload
 
+
+def _validate_zoom_percent(percent: float) -> None:
+    if percent == 0 or abs(percent) > 100:
+        raise click.UsageError("--percent must be non-zero and its absolute value must be less than or equal to 100.")
+
 # ---------------------------------------------------------------------------
 # Device info & screen
 # ---------------------------------------------------------------------------
@@ -244,6 +249,38 @@ def cmd_long_click_coord(duration, x, y):
     u2_code = f"d.long_click({x}, {y}, duration={duration})"
     backend = connect_backend()
     backend.long_click(x, y, duration=duration)
+    output_result(None, u2_code)
+
+
+@click.command("drag-and-drop")
+@click.option("--duration", default=0.5, type=float, help="Drag duration in seconds")
+@click.argument("fx", type=float)
+@click.argument("fy", type=float)
+@click.argument("tx", type=float)
+@click.argument("ty", type=float)
+def cmd_drag_and_drop(duration, fx, fy, tx, ty):
+    """Drag from (FX, FY) to (TX, TY). Coords can be 0-1 (relative) or pixels."""
+    u2_code = f"d.drag_and_drop({fx}, {fy}, {tx}, {ty}, duration={duration})"
+    backend = connect_backend()
+    backend.drag_and_drop(fx, fy, tx, ty, duration=duration)
+    output_result(None, u2_code)
+
+
+@click.command("zoom")
+@click.option("--center-x", required=True, type=float, help="Zoom center X coordinate (0-1 relative or pixels)")
+@click.option("--center-y", required=True, type=float, help="Zoom center Y coordinate (0-1 relative or pixels)")
+@click.option(
+    "--percent",
+    required=True,
+    type=float,
+    help="Positive values zoom in, negative values zoom out; absolute value must be 1-100.",
+)
+def cmd_zoom(center_x, center_y, percent):
+    """Zoom around the UI element covering the given center point."""
+    _validate_zoom_percent(percent)
+    u2_code = f"d.zoom(center_x={center_x}, center_y={center_y}, percent={percent})"
+    backend = connect_backend()
+    backend.zoom(center_x, center_y, percent=percent)
     output_result(None, u2_code)
 
 

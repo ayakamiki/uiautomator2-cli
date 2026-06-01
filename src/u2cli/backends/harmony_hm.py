@@ -97,6 +97,38 @@ def _bounds_center(bounds: str) -> tuple[int, int]:
     return ((left + right) // 2, (top + bottom) // 2)
 
 
+def _parse_harmony_bounds(bounds: str) -> tuple[int, int, int, int] | None:
+    match = _BOUNDS_RE.fullmatch(bounds or "")
+    if not match:
+        return None
+    return tuple(int(group) for group in match.groups())
+
+
+def _bounds_area(bounds: tuple[int, int, int, int]) -> int:
+    left, top, right, bottom = bounds
+    return max(0, right - left) * max(0, bottom - top)
+
+
+def _bounds_contain_point(bounds: tuple[int, int, int, int], x: int, y: int) -> bool:
+    left, top, right, bottom = bounds
+    return left <= x <= right and top <= y <= bottom
+
+
+def _coerce_absolute_point(size: tuple[int, int], x: float, y: float) -> tuple[int, int]:
+    width, height = size
+    abs_x = int(round(x * width)) if 0.0 <= x <= 1.0 else int(round(x))
+    abs_y = int(round(y * height)) if 0.0 <= y <= 1.0 else int(round(y))
+    return abs_x, abs_y
+
+
+def _pinch_in_scale_from_percent(percent: float) -> float:
+    return max(0.1, 1.0 - (percent / 200.0))
+
+
+def _pinch_out_scale_from_percent(percent: float) -> float:
+    return 1.0 + (percent / 100.0)
+
+
 def _walk_hierarchy(node: dict[str, Any]):
     yield node
     for child in node.get("children", []):
@@ -275,6 +307,16 @@ class HarmonyHmElement:
         raise NotImplementedError(
             "Harmony backend skeleton does not expose scroll yet; add this when locator/scroll primitives are wired."
         )
+
+    def pinch_in(self, *, percent: float = 100.0) -> None:
+        _call_first(self._element, ("pinch_in",), scale=_pinch_in_scale_from_percent(percent))
+
+    def pinch_out(self, *, percent: float = 100.0) -> None:
+        _call_first(self._element, ("pinch_out",), scale=_pinch_out_scale_from_percent(percent))
+
+    def drag_to(self, target: "HarmonyHmElement", *, duration: float = 0.5) -> None:
+        target_element = getattr(target, "_element", target)
+        _call_first(self._element, ("drag_to",), target_element, duration=duration)
 
 
 class HarmonyHmLocator(HarmonyHmElement):
@@ -668,6 +710,50 @@ class HarmonyHmBackend:
 
     def raw_device(self) -> Any:
         return self._device
+
+    def _build_selector_from_point_match(self, attributes: dict[str, Any]) -> dict[str, Any]:
+        selector: dict[str, Any] = {}
+        matched_text = self._attribute_value(attributes, "text")
+        matched_description = self._attribute_value(attributes, "description", "content-desc")
+        matched_resource_id = self._attribute_value(attributes, "id", "resource-id")
+        matched_class_name = self._attribute_value(attributes, "type", "class")
+
+        if matched_text:
+            selector["text"] = matched_text
+        if matched_description:
+            selector["description"] = matched_description
+        if matched_resource_id:
+            selector["resourceId"] = matched_resource_id
+        if matched_class_name:
+            selector["className"] = matched_class_name
+        if not selector:
+            raise NotImplementedError("Harmony backend could not derive a selector from the hierarchy node at the requested point")
+        return selector
+
+    def _resolve_element_at_point(self, x: float, y: float) -> HarmonyHmElement:
+        abs_x, abs_y = _coerce_absolute_point(self.window_size(), x, y)
+        hierarchy = _call_first(self._device, ("dump_hierarchy",))
+        best_attributes: dict[str, Any] | None = None
+        best_area: int | None = None
+        best_depth = -1
+
+        def visit(node: dict[str, Any], depth: int) -> None:
+            nonlocal best_attributes, best_area, best_depth
+            attributes = node.get("attributes", {})
+            bounds = _parse_harmony_bounds(str(attributes.get("bounds") or ""))
+            if bounds is not None and _bounds_contain_point(bounds, abs_x, abs_y):
+                area = _bounds_area(bounds)
+                if best_area is None or area < best_area or (area == best_area and depth > best_depth):
+                    best_attributes = attributes
+                    best_area = area
+                    best_depth = depth
+            for child in node.get("children", []):
+                visit(child, depth + 1)
+
+        visit(hierarchy, 0)
+        if best_attributes is None:
+            raise RuntimeError("element not found at the requested zoom center")
+        return self.select(self._build_selector_from_point_match(best_attributes))
 
     def _selector_uses_dynamic_resolution(self, selector: dict[str, Any]) -> bool:
         return any(
@@ -1120,6 +1206,22 @@ class HarmonyHmBackend:
 
     def long_click(self, x: float, y: float, *, duration: float = 0.5) -> None:
         _call_first(self._device, ("long_click",), x, y, duration=duration)
+
+    def drag_and_drop(self, fx: float, fy: float, tx: float, ty: float, *, duration: float = 0.5) -> None:
+        gesture = getattr(self._device, "gesture", None)
+        if gesture is not None:
+            hold_duration = min(0.5, max(0.1, duration / 3.0))
+            move_duration = max(0.1, duration)
+            gesture.start(fx, fy, interval=hold_duration).move(tx, ty, interval=move_duration).action()
+            return
+        _call_first(self._device, ("swipe",), fx, fy, tx, ty)
+
+    def zoom(self, center_x: float, center_y: float, *, percent: float) -> None:
+        element = self._resolve_element_at_point(center_x, center_y)
+        if percent > 0:
+            element.pinch_out(percent=percent)
+            return
+        element.pinch_in(percent=abs(percent))
 
     def send_keys(self, text: str, *, clear: bool = True) -> None:
         if clear:

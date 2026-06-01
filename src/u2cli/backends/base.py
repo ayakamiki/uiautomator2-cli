@@ -45,6 +45,15 @@ class ElementHandle(Protocol):
     ) -> None:
         """Scroll the selected element."""
 
+    def pinch_in(self, *, percent: float = 100.0) -> None:
+        """Pinch in on the selected element."""
+
+    def pinch_out(self, *, percent: float = 100.0) -> None:
+        """Pinch out on the selected element."""
+
+    def drag_to(self, target: "ElementHandle", *, duration: float = 0.5) -> None:
+        """Drag the selected element to another element."""
+
 
 class LocatorHandle(Protocol):
     """Minimal locator handle used by migrated XPath-style commands."""
@@ -143,6 +152,12 @@ class AutomationBackend(Protocol):
 
     def long_click(self, x: float, y: float, *, duration: float = 0.5) -> None:
         """Long-click at coordinates."""
+
+    def drag_and_drop(self, fx: float, fy: float, tx: float, ty: float, *, duration: float = 0.5) -> None:
+        """Drag from one coordinate to another."""
+
+    def zoom(self, center_x: float, center_y: float, *, percent: float) -> None:
+        """Zoom around the UI element that covers the given center point."""
 
     def send_keys(self, text: str, *, clear: bool = True) -> None:
         """Type text into the current field."""

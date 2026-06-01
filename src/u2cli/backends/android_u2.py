@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
 
@@ -31,6 +32,7 @@ _MEDIA_CONTROL_KEYCODES = {
 
 _SESSION_HEADER_RE = re.compile(r"^\s+\S+\s+\S+/\S+\s+\(userId=\d+\)$")
 _PACKAGE_RE = re.compile(r"^\s+package=(?P<package>.+)$")
+_ANDROID_BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 _STATE_RE = re.compile(
     r"state=PlaybackState \{state=(?P<code>\d+), position=(?P<position>-?\d+), "
     r"buffered position=(?P<buffered>-?\d+), speed=(?P<speed>-?[0-9.]+)"
@@ -113,11 +115,73 @@ def _select_playback_session(sessions: list[dict[str, Any]], package: str | None
     return max(candidates, key=rank)
 
 
+def _coerce_absolute_point(size: tuple[int, int], x: float, y: float) -> tuple[int, int]:
+    width, height = size
+    abs_x = int(round(x * width)) if 0.0 <= x <= 1.0 else int(round(x))
+    abs_y = int(round(y * height)) if 0.0 <= y <= 1.0 else int(round(y))
+    return abs_x, abs_y
+
+
+def _parse_android_bounds(bounds: str) -> tuple[int, int, int, int] | None:
+    match = _ANDROID_BOUNDS_RE.fullmatch(bounds or "")
+    if not match:
+        return None
+    return tuple(int(group) for group in match.groups())
+
+
+def _bounds_contain_point(bounds: tuple[int, int, int, int], x: int, y: int) -> bool:
+    left, top, right, bottom = bounds
+    return left <= x <= right and top <= y <= bottom
+
+
+def _bounds_area(bounds: tuple[int, int, int, int]) -> int:
+    left, top, right, bottom = bounds
+    return max(0, right - left) * max(0, bottom - top)
+
+
+def _build_android_selector_from_node(attributes: dict[str, str]) -> dict[str, Any]:
+    selector: dict[str, Any] = {}
+    if attributes.get("resource-id"):
+        selector["resourceId"] = attributes["resource-id"]
+    if attributes.get("text"):
+        selector["text"] = attributes["text"]
+    if attributes.get("class"):
+        selector["className"] = attributes["class"]
+    if attributes.get("content-desc"):
+        selector["description"] = attributes["content-desc"]
+    if attributes.get("package"):
+        selector["packageName"] = attributes["package"]
+    if attributes.get("index"):
+        try:
+            selector["index"] = int(attributes["index"])
+        except ValueError:
+            pass
+    if not selector:
+        raise RuntimeError("could not derive an Android selector from the hierarchy node at the requested point")
+    return selector
+
+
+def _selector_info_center(info: Any) -> tuple[int, int] | None:
+    if not isinstance(info, dict):
+        return None
+    bounds = info.get("visibleBounds") or info.get("bounds")
+    if not isinstance(bounds, dict):
+        return None
+    left = bounds.get("left")
+    top = bounds.get("top")
+    right = bounds.get("right")
+    bottom = bounds.get("bottom")
+    if None in (left, top, right, bottom):
+        return None
+    return ((int(left) + int(right)) // 2, (int(top) + int(bottom)) // 2)
+
+
 class AndroidU2Element:
     """Thin wrapper around a uiautomator2 selector object."""
 
-    def __init__(self, element: Any) -> None:
+    def __init__(self, element: Any, selector: dict[str, Any] | None = None) -> None:
         self._element = element
+        self._selector = dict(selector or {})
 
     def click(self, *, timeout: float = 3.0) -> None:
         self._element.click(timeout=timeout)
@@ -166,6 +230,28 @@ class AndroidU2Element:
             return
         getattr(getattr(self._element.scroll, direction), action)()
 
+    def pinch_in(self, *, percent: float = 100.0) -> None:
+        self._element.pinch_in(percent=int(round(percent)))
+
+    def pinch_out(self, *, percent: float = 100.0) -> None:
+        self._element.pinch_out(percent=int(round(percent)))
+
+    def drag_to(self, target: "AndroidU2Element", *, duration: float = 0.5) -> None:
+        target_element = getattr(target, "_element", target)
+        target_info = getattr(target_element, "info", None)
+        if callable(target_info):
+            target_info = target_info()
+        center = _selector_info_center(target_info)
+        if center is not None:
+            self._element.drag_to(center[0], center[1], duration=duration)
+            return
+
+        target_selector = getattr(target, "_selector", None)
+        if target_selector:
+            self._element.drag_to(duration=duration, **target_selector)
+            return
+        raise RuntimeError("Android element drag_to requires a target element with bounds or a concrete target selector")
+
 
 class AndroidU2Locator:
     """Thin wrapper around a uiautomator2 XPath selector object."""
@@ -199,8 +285,33 @@ class AndroidU2Backend:
     def raw_device(self) -> Any:
         return self._device
 
+    def _resolve_element_at_point(self, x: float, y: float) -> AndroidU2Element:
+        abs_x, abs_y = _coerce_absolute_point(self.window_size(), x, y)
+        root = ET.fromstring(self.dump_hierarchy_xml())
+        best_attributes: dict[str, str] | None = None
+        best_area: int | None = None
+        best_depth = -1
+
+        def visit(node: ET.Element, depth: int) -> None:
+            nonlocal best_attributes, best_area, best_depth
+            if node.tag == "node":
+                bounds = _parse_android_bounds(node.attrib.get("bounds", ""))
+                if bounds is not None and _bounds_contain_point(bounds, abs_x, abs_y):
+                    area = _bounds_area(bounds)
+                    if best_area is None or area < best_area or (area == best_area and depth > best_depth):
+                        best_attributes = dict(node.attrib)
+                        best_area = area
+                        best_depth = depth
+            for child in list(node):
+                visit(child, depth + 1)
+
+        visit(root, 0)
+        if best_attributes is None:
+            raise RuntimeError("element not found at the requested zoom center")
+        return self.select(_build_android_selector_from_node(best_attributes))
+
     def select(self, selector: dict[str, Any]) -> AndroidU2Element:
-        return AndroidU2Element(self._device(**selector))
+        return AndroidU2Element(self._device(**selector), selector=selector)
 
     def locate(self, strategy: str, value: str) -> AndroidU2Locator:
         if strategy != "xpath":
@@ -303,6 +414,16 @@ class AndroidU2Backend:
 
     def long_click(self, x: float, y: float, *, duration: float = 0.5) -> None:
         self._device.long_click(x, y, duration=duration)
+
+    def drag_and_drop(self, fx: float, fy: float, tx: float, ty: float, *, duration: float = 0.5) -> None:
+        self._device.drag(fx, fy, tx, ty, duration=duration)
+
+    def zoom(self, center_x: float, center_y: float, *, percent: float) -> None:
+        element = self._resolve_element_at_point(center_x, center_y)
+        if percent > 0:
+            element.pinch_out(percent=percent)
+            return
+        element.pinch_in(percent=abs(percent))
 
     def send_keys(self, text: str, *, clear: bool = True) -> None:
         self._device.send_keys(text, clear=clear)

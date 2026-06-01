@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from click.testing import CliRunner
 
@@ -21,7 +21,11 @@ from u2cli.element import (
     cmd_element_info,
     cmd_exists,
     cmd_get_text,
+    cmd_drag_and_drop_element,
+    cmd_drag_and_drop_xpath,
     cmd_long_click,
+    cmd_pinch_in,
+    cmd_pinch_out,
     cmd_scroll,
     cmd_set_text,
     cmd_swipe_element,
@@ -36,6 +40,7 @@ from u2cli.screen import (
     cmd_current_app,
     cmd_device_info,
     cmd_dump_hierarchy,
+    cmd_drag_and_drop,
     cmd_double_click,
     cmd_long_click_coord,
     cmd_media_control,
@@ -54,6 +59,7 @@ from u2cli.screen import (
     cmd_swipe_ext,
     cmd_ui_info,
     cmd_window_size,
+    cmd_zoom,
 )
 from u2cli.services.hierarchy import create_hierarchy_service
 from u2cli.services.xpath import (
@@ -95,6 +101,8 @@ def test_element_commands_use_backend_api():
         result_info = runner.invoke(cmd_element_info, ["--text", "Login"])
         result_swipe_element = runner.invoke(cmd_swipe_element, ["--text", "Login", "--direction", "left"])
         result_scroll = runner.invoke(cmd_scroll, ["--text", "Login", "--to-text", "More"])
+        result_pinch_in = runner.invoke(cmd_pinch_in, ["--text", "Login", "--percent", "25"])
+        result_pinch_out = runner.invoke(cmd_pinch_out, ["--text", "Login", "--percent", "60"])
 
     assert result_click.exit_code == 0
     assert result_long_click.exit_code == 0
@@ -106,6 +114,8 @@ def test_element_commands_use_backend_api():
     assert result_info.exit_code == 0
     assert result_swipe_element.exit_code == 0
     assert result_scroll.exit_code == 0
+    assert result_pinch_in.exit_code == 0
+    assert result_pinch_out.exit_code == 0
     backend.select.assert_any_call({"text": "Login"})
     element.click.assert_called_once_with(timeout=3.0)
     element.long_click.assert_called_once_with(duration=0.5, timeout=3.0)
@@ -117,7 +127,72 @@ def test_element_commands_use_backend_api():
     element.info.assert_called_once_with()
     element.swipe.assert_called_once_with("left", steps=10)
     element.scroll.assert_called_once_with(direction="vert", action="forward", to_text="More")
-    assert mock_output.call_count == 10
+    element.pinch_in.assert_called_once_with(percent=25.0)
+    element.pinch_out.assert_called_once_with(percent=60.0)
+    assert mock_output.call_count == 12
+
+
+def test_drag_and_drop_element_command_uses_source_and_target_selectors():
+    runner = CliRunner()
+    source = Mock()
+    target = Mock()
+    backend = Mock()
+    backend.select.side_effect = [source, target]
+
+    with patch("u2cli.element.connect_backend", return_value=backend), patch(
+        "u2cli.element._drag_via_drop_surface_if_needed", return_value=False
+    ), patch("u2cli.element.output_result") as mock_output:
+        result = runner.invoke(
+            cmd_drag_and_drop_element,
+            [
+                "--text",
+                "Source",
+                "--target-text",
+                "Target",
+                "--duration",
+                "0.8",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert backend.select.call_args_list == [call({"text": "Source"}), call({"text": "Target"})]
+    source.drag_to.assert_called_once_with(target, duration=0.8)
+    mock_output.assert_called_once_with(None, "d(text='Source').drag_to(d(text='Target'), duration=0.8)")
+
+
+def test_drag_and_drop_element_command_uses_coordinate_fallback_for_drop_surface_target():
+    runner = CliRunner()
+    backend = Mock()
+    backend.platform = "android"
+    backend.backend_name = "uiautomator2"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="android.widget.FrameLayout">'
+        '<node class="android.widget.TextView" text="Source" bounds="[10,20][110,120]" clickable="true" />'
+        '<node class="android.view.ViewGroup" resource-id="workspace_screen" bounds="[0,0][400,800]">'
+        '<node class="android.widget.TextView" text="Other" bounds="[200,50][300,150]" clickable="true" />'
+        "</node>"
+        "</node>"
+        "</hierarchy>"
+    )
+
+    with patch("u2cli.element.connect_backend", return_value=backend), patch("u2cli.element.output_result") as mock_output:
+        result = runner.invoke(
+            cmd_drag_and_drop_element,
+            [
+                "--text",
+                "Source",
+                "--target-resource-id",
+                "workspace_screen",
+                "--duration",
+                "0.8",
+            ],
+        )
+
+    assert result.exit_code == 0
+    backend.drag_and_drop.assert_called_once_with(60, 70, 200, 400, duration=0.8)
+    backend.select.assert_not_called()
+    mock_output.assert_called_once_with(None, "d(text='Source').drag_to(d(resourceId='workspace_screen'), duration=0.8)")
 
 
 def test_element_selector_cli_exposes_description_pattern_options():
@@ -441,8 +516,10 @@ def test_xpath_service_uses_normalized_hierarchy_queries():
     assert service.get_text("//Button") == "Login"
     assert service.exists("%Login%") is True
     service.set_text("hello%", "hello")
+    service.drag_and_drop("@com.demo:id/login", "//Button")
 
     backend.click.assert_called_once_with(60, 40)
+    backend.drag_and_drop.assert_called_once_with(60, 40, 60, 40, duration=0.5)
     backend.select.assert_called_once_with(
         {
             "resourceId": "com.demo:id/input",
@@ -451,6 +528,29 @@ def test_xpath_service_uses_normalized_hierarchy_queries():
         }
     )
     element_handle.set_text.assert_called_once_with("hello", timeout=0.0)
+
+
+def test_xpath_service_drag_and_drop_uses_explicit_coordinate_strategy_for_drop_surface_target():
+    backend = Mock()
+    backend.platform = "android"
+    backend.backend_name = "uiautomator2"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="android.widget.FrameLayout">'
+        '<node class="android.widget.TextView" text="Source" bounds="[10,20][110,120]" clickable="true" />'
+        '<node class="android.view.ViewGroup" resource-id="workspace_screen" bounds="[0,0][400,800]">'
+        '<node class="android.widget.TextView" text="Other" bounds="[200,50][300,150]" clickable="true" />'
+        "</node>"
+        "</node>"
+        "</hierarchy>"
+    )
+
+    service = create_xpath_service(backend)
+
+    service.drag_and_drop("//TextView[@text='Source']", "//*[@resource-id='workspace_screen']", duration=0.8)
+
+    backend.drag_and_drop.assert_called_once_with(60, 70, 200, 400, duration=0.8)
+    backend.select.assert_not_called()
 
 
 def test_xpath_service_sets_text_via_click_delete_and_send_keys_on_harmony_richeditor():
@@ -568,17 +668,20 @@ def test_xpath_commands_use_service():
         result_get_text = runner.invoke(cmd_xpath_get_text, ["//Button"])
         result_exists = runner.invoke(cmd_xpath_exists, ["//Button"])
         result_set_text = runner.invoke(cmd_xpath_set_text, ["//Button", "hello"])
+        result_drag = runner.invoke(cmd_drag_and_drop_xpath, ["//Source", "//Target", "--duration", "0.8"])
 
     assert result_click.exit_code == 0
     assert result_get_text.exit_code == 0
     assert result_exists.exit_code == 0
     assert result_set_text.exit_code == 0
-    assert mock_factory.call_count == 4
+    assert result_drag.exit_code == 0
+    assert mock_factory.call_count == 5
     xpath_service.click.assert_called_once_with("//Button", timeout=3.0)
     xpath_service.get_text.assert_called_once_with("//Button")
     xpath_service.exists.assert_called_once_with("//Button")
     xpath_service.set_text.assert_called_once_with("//Button", "hello")
-    assert mock_output.call_count == 4
+    xpath_service.drag_and_drop.assert_called_once_with("//Source", "//Target", duration=0.8)
+    assert mock_output.call_count == 5
 
 
 def test_xpath_commands_run_on_harmony_once_normalized_service_is_available():
@@ -626,6 +729,8 @@ def test_screen_commands_use_backend_api(tmp_path):
         result_click_coord = runner.invoke(cmd_click_coord, ["10", "20"])
         result_double_click = runner.invoke(cmd_double_click, ["10", "20"])
         result_long_click_coord = runner.invoke(cmd_long_click_coord, ["10", "20"])
+        result_drag_and_drop = runner.invoke(cmd_drag_and_drop, ["10", "20", "30", "40"])
+        result_zoom = runner.invoke(cmd_zoom, ["--center-x", "0.5", "--center-y", "0.4", "--percent", "35"])
         result_send_keys = runner.invoke(cmd_send_keys, ["hello"])
         result_open_notification = runner.invoke(cmd_open_notification, [])
         result_open_quick_settings = runner.invoke(cmd_open_quick_settings, [])
@@ -648,6 +753,8 @@ def test_screen_commands_use_backend_api(tmp_path):
     assert result_click_coord.exit_code == 0
     assert result_double_click.exit_code == 0
     assert result_long_click_coord.exit_code == 0
+    assert result_drag_and_drop.exit_code == 0
+    assert result_zoom.exit_code == 0
     assert result_send_keys.exit_code == 0
     assert result_open_notification.exit_code == 0
     assert result_open_quick_settings.exit_code == 0
@@ -669,6 +776,8 @@ def test_screen_commands_use_backend_api(tmp_path):
     backend.click.assert_called_once_with(10.0, 20.0)
     backend.double_click.assert_called_once_with(10.0, 20.0, duration=0.1)
     backend.long_click.assert_called_once_with(10.0, 20.0, duration=0.5)
+    backend.drag_and_drop.assert_called_once_with(10.0, 20.0, 30.0, 40.0, duration=0.5)
+    backend.zoom.assert_called_once_with(0.5, 0.4, percent=35.0)
     backend.send_keys.assert_called_once_with("hello", clear=True)
     backend.open_notification.assert_called_once_with()
     backend.open_quick_settings.assert_called_once_with()
@@ -677,7 +786,7 @@ def test_screen_commands_use_backend_api(tmp_path):
     backend.current_app.assert_called_once_with()
     backend.media_control.assert_called_once_with("play-pause")
     assert fake_image.saved_to is not None
-    assert mock_output.call_count == 21
+    assert mock_output.call_count == 23
 
 
 def test_hierarchy_service_normalizes_backend_dump():
