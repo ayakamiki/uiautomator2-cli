@@ -104,6 +104,36 @@ def _parse_harmony_bounds(bounds: str) -> tuple[int, int, int, int] | None:
     return tuple(int(group) for group in match.groups())
 
 
+def _info_center(info: Any) -> tuple[int, int] | None:
+    if not info:
+        return None
+
+    if isinstance(info, dict):
+        bounds_center = info.get("boundsCenter")
+        if isinstance(bounds_center, dict):
+            x = bounds_center.get("x")
+            y = bounds_center.get("y")
+            if x is not None and y is not None:
+                return (int(x), int(y))
+
+        bounds = info.get("bounds")
+        if isinstance(bounds, dict):
+            left = bounds.get("left")
+            top = bounds.get("top")
+            right = bounds.get("right")
+            bottom = bounds.get("bottom")
+            if None not in (left, top, right, bottom):
+                return ((int(left) + int(right)) // 2, (int(top) + int(bottom)) // 2)
+
+        if isinstance(bounds, str):
+            parsed = _parse_harmony_bounds(bounds)
+            if parsed is not None:
+                left, top, right, bottom = parsed
+                return ((left + right) // 2, (top + bottom) // 2)
+
+    return None
+
+
 def _bounds_area(bounds: tuple[int, int, int, int]) -> int:
     left, top, right, bottom = bounds
     return max(0, right - left) * max(0, bottom - top)
@@ -315,6 +345,19 @@ class HarmonyHmElement:
         _call_first(self._element, ("pinch_out",), scale=_pinch_out_scale_from_percent(percent))
 
     def drag_to(self, target: "HarmonyHmElement", *, duration: float = 0.5) -> None:
+        target_info = None
+        target_info_reader = getattr(target, "info", None)
+        if callable(target_info_reader):
+            try:
+                target_info = target_info_reader()
+            except Exception:
+                target_info = None
+
+        center = _info_center(target_info)
+        if center is not None:
+            _call_first(self._element, ("drag_to",), center[0], center[1], duration=duration)
+            return
+
         target_element = getattr(target, "_element", target)
         _call_first(self._element, ("drag_to",), target_element, duration=duration)
 

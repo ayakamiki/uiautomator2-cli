@@ -36,7 +36,32 @@ class FakeHarmonyElement:
     def pinch_out(self, scale=2.0):
         self.driver.calls.append(("element_pinch_out", self.kwargs, scale))
 
-    def drag_to(self, target):
+    def info(self):
+        mapping = {
+            "text": {
+                "Login": {
+                    "bounds": {"left": 10, "top": 20, "right": 110, "bottom": 140},
+                    "boundsCenter": {"x": 60, "y": 80},
+                }
+            },
+            "id": {
+                "entry.login": {
+                    "bounds": {"left": 300, "top": 400, "right": 500, "bottom": 700},
+                    "boundsCenter": {"x": 400, "y": 550},
+                }
+            },
+        }
+        for key, entries in mapping.items():
+            value = self.kwargs.get(key)
+            if value in entries:
+                return entries[value]
+        return None
+
+    def drag_to(self, *args, **kwargs):
+        if len(args) >= 2 and all(isinstance(value, (int, float)) for value in args[:2]):
+            self.driver.calls.append(("element_drag_to_coords", self.kwargs, int(args[0]), int(args[1]), kwargs))
+            return
+        target = args[0]
         self.driver.calls.append(("element_drag_to", self.kwargs, target.kwargs))
 
 
@@ -485,7 +510,7 @@ def test_harmony_backend_zoom_targets_element_covering_center_point():
     )
 
 
-def test_harmony_element_drag_to_uses_native_component_drag_to():
+def test_harmony_element_drag_to_uses_target_center_coordinates_when_available():
     device = FakeHarmonyDevice()
     backend = HarmonyHmBackend(device=device, serial="HDC-1")
 
@@ -495,9 +520,27 @@ def test_harmony_element_drag_to_uses_native_component_drag_to():
     source.drag_to(target, duration=0.8)
 
     assert device.calls[-1] == (
+        "element_drag_to_coords",
+        {"text": "Login"},
+        400,
+        550,
+        {"duration": 0.8},
+    )
+
+
+def test_harmony_element_drag_to_falls_back_to_native_target_object_without_bounds():
+    device = FakeHarmonyDevice()
+    backend = HarmonyHmBackend(device=device, serial="HDC-1")
+
+    source = backend.select({"text": "Login"})
+    target = backend.select({"description": "Drop here"})
+
+    source.drag_to(target, duration=0.8)
+
+    assert device.calls[-1] == (
         "element_drag_to",
         {"text": "Login"},
-        {"id": "entry.login"},
+        {"description": "Drop here"},
     )
 
 

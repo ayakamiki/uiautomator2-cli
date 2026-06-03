@@ -348,6 +348,9 @@ Selector-based element actions shared across Android and Harmony.
 
 `drag-and-drop-element` uses one source selector and one target selector in the same command.
 Target selector options use the `--target-*` prefix, for example `--target-text`, `--target-resource-id`, and `--target-description`.
+For Harmony launcher icon rearrangement scenarios, prefer coordinate dragging with `drag-and-drop FX FY TX TY`
+because launcher acceptance can be gesture-timing sensitive. Start with `--duration 1.2` and then tune both
+duration and destination coordinates if needed.
 
 ### XPath Commands
 

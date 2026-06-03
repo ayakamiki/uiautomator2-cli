@@ -129,6 +129,41 @@ def _split_drag_selector_kwargs(kwargs: dict) -> tuple[dict, dict]:
     return source_kwargs, target_kwargs
 
 
+def _resolve_node_by_path(root, path):
+    node = root
+    current_path = ()
+    for step in path:
+        next_path = current_path + (step,)
+        node = next((child for child in node.children if child.ref.path == next_path), None)
+        if node is None:
+            return None
+        current_path = next_path
+    return node
+
+
+def _choose_harmony_drag_anchor(snapshot, node):
+    if node is None or node.bounds is None:
+        return node
+    if node.clickable:
+        return node
+
+    center_x, center_y = node.bounds.center
+    path = node.ref.path
+    while path:
+        path = path[:-1]
+        parent = _resolve_node_by_path(snapshot.root, path)
+        if parent is None or parent.bounds is None or not parent.clickable:
+            continue
+
+        if (
+            parent.bounds.left <= center_x <= parent.bounds.right
+            and parent.bounds.top <= center_y <= parent.bounds.bottom
+        ):
+            return parent
+
+    return node
+
+
 def _drag_via_drop_surface_if_needed(backend, source_sel: dict, target_sel: dict, *, duration: float) -> bool:
     snapshot = create_hierarchy_service(backend).capture()
     source_node = find_selector_node(snapshot, source_sel)
@@ -136,9 +171,17 @@ def _drag_via_drop_surface_if_needed(backend, source_sel: dict, target_sel: dict
 
     if source_node is None or target_node is None:
         return False
-    if not node_is_drop_surface(target_node):
-        return False
+
+    if getattr(backend, "platform", None) == "harmony":
+        source_node = _choose_harmony_drag_anchor(snapshot, source_node)
+        target_node = _choose_harmony_drag_anchor(snapshot, target_node)
+
     if source_node.bounds is None or target_node.bounds is None:
+        return False
+
+    # Harmony text selectors commonly resolve to label nodes where native
+    # object-to-object drag_to can fail; coordinate dragging is more robust.
+    if getattr(backend, "platform", None) != "harmony" and not node_is_drop_surface(target_node):
         return False
 
     start_x, start_y = source_node.bounds.center

@@ -349,6 +349,8 @@ u2cli --platform harmony xpath-exists "//Button[@text='Login'][2]"
 
 `drag-and-drop-element` 在同一条命令里同时接收源元素 selector 和目标元素 selector。
 目标元素参数统一使用 `--target-*` 前缀，例如 `--target-text`、`--target-resource-id`、`--target-description`。
+在 Harmony launcher 桌面图标重排场景里，建议优先使用坐标拖动 `drag-and-drop FX FY TX TY`，
+因为 launcher 对手势时长比较敏感。建议先从 `--duration 1.2` 起步，再根据结果微调时长和落点坐标。
 
 ### XPath 操作
 

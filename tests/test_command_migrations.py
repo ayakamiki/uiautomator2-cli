@@ -195,6 +195,41 @@ def test_drag_and_drop_element_command_uses_coordinate_fallback_for_drop_surface
     mock_output.assert_called_once_with(None, "d(text='Source').drag_to(d(resourceId='workspace_screen'), duration=0.8)")
 
 
+def test_drag_and_drop_element_command_uses_coordinate_fallback_for_harmony_text_targets():
+    runner = CliRunner()
+    backend = Mock()
+    backend.platform = "harmony"
+    backend.backend_name = "hmdriver2+hdc"
+    backend.dump_hierarchy_xml.return_value = (
+        "<hierarchy>"
+        '<node class="RelativeContainer" bounds="[334,1256][638,1592]" clickable="true">'
+        '<node class="Text" text="Source" bounds="[388,1487][585,1537]" clickable="false" />'
+        "</node>"
+        '<node class="RelativeContainer" bounds="[943,1256][1247,1592]" clickable="true">'
+        '<node class="Text" text="Target" bounds="[1039,1487][1152,1537]" clickable="false" />'
+        "</node>"
+        "</hierarchy>"
+    )
+
+    with patch("u2cli.element.connect_backend", return_value=backend), patch("u2cli.element.output_result") as mock_output:
+        result = runner.invoke(
+            cmd_drag_and_drop_element,
+            [
+                "--text",
+                "Source",
+                "--target-text",
+                "Target",
+                "--duration",
+                "0.8",
+            ],
+        )
+
+    assert result.exit_code == 0
+    backend.drag_and_drop.assert_called_once_with(486, 1424, 1095, 1424, duration=0.8)
+    backend.select.assert_not_called()
+    mock_output.assert_called_once_with(None, "d(text='Source').drag_to(d(text='Target'), duration=0.8)")
+
+
 def test_element_selector_cli_exposes_description_pattern_options():
     runner = CliRunner()
     element = Mock()
