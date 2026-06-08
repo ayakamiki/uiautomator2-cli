@@ -570,6 +570,32 @@ User ID #100
     }
 
 
+def test_harmony_backend_current_app_prefers_aa_dump_over_stale_driver_result():
+        device = FakeHarmonyDevice()
+        device.current_app_result = ("com.huawei.hmos.settings", "com.huawei.hmos.settings.MainAbility")
+        device.shell_outputs["aa dump -l"] = """
+User ID #100
+    current mission lists:{
+        Mission ID #2910  mission name #[#com.amap.hmapp:entry:EntryAbility]
+            AbilityRecord ID #19213
+                app name [com.amap.hmapp]
+                main name [EntryAbility]
+                bundle name [com.amap.hmapp]
+                ability type [PAGE]
+                state #FOREGROUND
+                app state #FOREGROUND
+                ready #1  window attached #0  launcher #0
+                isKeepAlive: false
+    }
+"""
+        backend = HarmonyHmBackend(device=device, serial="HDC-1")
+
+        assert backend.current_app() == {
+                "package": "com.amap.hmapp",
+                "activity": "EntryAbility",
+        }
+
+
 def test_harmony_backend_current_app_keeps_none_when_no_foreground_mission_found():
     device = FakeHarmonyDevice()
     device.current_app_result = (None, None)

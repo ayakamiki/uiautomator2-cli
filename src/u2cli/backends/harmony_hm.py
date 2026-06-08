@@ -1075,17 +1075,6 @@ class HarmonyHmBackend:
         return SimpleNamespace(output=str(result), exit_code=0)
 
     def current_app(self) -> Any:
-        result = _call_first(self._device, ("current_app",))
-        if isinstance(result, tuple) and len(result) >= 2:
-            package_name, activity_name = result[0], result[1]
-            if package_name or activity_name:
-                return {"package": package_name, "activity": activity_name}
-            empty_result = {"package": package_name, "activity": activity_name}
-        else:
-            empty_result = {"package": None, "activity": None}
-        if isinstance(result, dict) and (result.get("package") or result.get("activity")):
-            return result
-
         for command in ("aa dump -l", "aa dump --mission-list"):
             try:
                 shell_result = self.shell(command)
@@ -1102,6 +1091,17 @@ class HarmonyHmBackend:
         hierarchy_fallback = _extract_current_app_from_hierarchy(hierarchy)
         if hierarchy_fallback is not None:
             return hierarchy_fallback
+
+        result = _call_first(self._device, ("current_app",))
+        if isinstance(result, tuple) and len(result) >= 2:
+            package_name, activity_name = result[0], result[1]
+            if package_name or activity_name:
+                return {"package": package_name, "activity": activity_name}
+            empty_result = {"package": package_name, "activity": activity_name}
+        else:
+            empty_result = {"package": None, "activity": None}
+        if isinstance(result, dict) and (result.get("package") or result.get("activity")):
+            return result
 
         return result if isinstance(result, dict) else empty_result
 
