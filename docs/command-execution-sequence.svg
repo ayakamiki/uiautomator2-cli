@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1120" viewBox="0 0 1700 1120" role="img" aria-labelledby="title desc">
+  <title id="title">u2cli command execution sequence</title>
+  <desc id="desc">Sequence diagram for how a typical u2cli command flows through cli.py, daemon.py, device.py, backend factory, services, and platform drivers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#eef2f7"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrowSoft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 32px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #475569; }
+      .lane-title { font-size: 16px; font-weight: 700; }
+      .lane-subtitle { font-size: 12px; fill: #cbd5e1; }
+      .step { font-size: 14px; }
+      .note-title { font-size: 16px; font-weight: 700; }
+      .note-text { font-size: 13px; fill: #334155; }
+      .small { font-size: 12px; fill: #64748b; }
+      .arrow { stroke: #334155; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .return-arrow { stroke: #64748b; stroke-width: 2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrowSoft); }
+      .lifeline { stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 10 8; }
+      .lane-box { fill: url(#header); rx: 18; ry: 18; filter: url(#shadow); }
+      .note-box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 16; ry: 16; filter: url(#shadow); }
+      .band-daemon { fill: #e0f2fe; stroke: #7dd3fc; stroke-width: 1.5; rx: 18; ry: 18; }
+      .band-direct { fill: #ecfccb; stroke: #a3e635; stroke-width: 1.5; rx: 18; ry: 18; }
+      .band-platform { fill: #f5f3ff; stroke: #c4b5fd; stroke-width: 1.5; rx: 18; ry: 18; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1700" height="1120" fill="url(#bg)"/>
+
+  <text x="60" y="68" class="title">u2cli Command Execution Sequence</text>
+  <text x="60" y="98" class="subtitle">Typical flow for a normal command such as `u2cli click --text Settings`, including daemon-first routing and the direct `--no-daemon` branch.</text>
+
+  <rect x="72" y="135" width="190" height="70" class="lane-box"/>
+  <text x="95" y="166" class="lane-title" fill="#f8fafc">Caller</text>
+  <text x="95" y="189" class="lane-subtitle">shell / user</text>
+
+  <rect x="292" y="135" width="190" height="70" class="lane-box"/>
+  <text x="315" y="166" class="lane-title" fill="#f8fafc">cli.py</text>
+  <text x="315" y="189" class="lane-subtitle">Click root group</text>
+
+  <rect x="512" y="135" width="190" height="70" class="lane-box"/>
+  <text x="535" y="166" class="lane-title" fill="#f8fafc">daemon.py</text>
+  <text x="535" y="189" class="lane-subtitle">delegate / serve</text>
+
+  <rect x="732" y="135" width="190" height="70" class="lane-box"/>
+  <text x="755" y="166" class="lane-title" fill="#f8fafc">command module</text>
+  <text x="755" y="189" class="lane-subtitle">screen.py / element.py / app.py</text>
+
+  <rect x="952" y="135" width="190" height="70" class="lane-box"/>
+  <text x="975" y="166" class="lane-title" fill="#f8fafc">device.py</text>
+  <text x="975" y="189" class="lane-subtitle">connect_backend + cache</text>
+
+  <rect x="1172" y="135" width="190" height="70" class="lane-box"/>
+  <text x="1195" y="166" class="lane-title" fill="#f8fafc">factory + backend</text>
+  <text x="1195" y="189" class="lane-subtitle">AndroidU2 / HarmonyHm</text>
+
+  <rect x="1392" y="135" width="190" height="70" class="lane-box"/>
+  <text x="1415" y="166" class="lane-title" fill="#f8fafc">services</text>
+  <text x="1415" y="189" class="lane-subtitle">hierarchy / xpath when needed</text>
+
+  <rect x="1612" y="135" width="70" height="70" class="lane-box"/>
+  <text x="1627" y="166" class="lane-title" fill="#f8fafc">OS</text>
+  <text x="1620" y="189" class="lane-subtitle">device</text>
+
+  <line x1="167" y1="205" x2="167" y2="1030" class="lifeline"/>
+  <line x1="387" y1="205" x2="387" y2="1030" class="lifeline"/>
+  <line x1="607" y1="205" x2="607" y2="1030" class="lifeline"/>
+  <line x1="827" y1="205" x2="827" y2="1030" class="lifeline"/>
+  <line x1="1047" y1="205" x2="1047" y2="1030" class="lifeline"/>
+  <line x1="1267" y1="205" x2="1267" y2="1030" class="lifeline"/>
+  <line x1="1487" y1="205" x2="1487" y2="1030" class="lifeline"/>
+  <line x1="1647" y1="205" x2="1647" y2="1030" class="lifeline"/>
+
+  <rect x="120" y="235" width="1400" height="450" class="band-daemon"/>
+  <text x="145" y="265" class="note-title">Path A: normal command, daemon-first</text>
+  <text x="145" y="286" class="note-text">Default path for most commands. `cli.py` calls `should_delegate_command()`, `run_via_daemon()`, then the daemon process executes the command slice and returns stdout/stderr.</text>
+
+  <path d="M 167 330 L 387 330" class="arrow"/>
+  <text x="215" y="322" class="step">1. invoke CLI with argv</text>
+
+  <path d="M 387 380 L 607 380" class="arrow"/>
+  <text x="425" y="372" class="step">2. parse global flags, choose delegate path</text>
+
+  <path d="M 607 430 L 607 470" class="arrow"/>
+  <text x="624" y="455" class="step">3. ensure daemon is running</text>
+
+  <path d="M 607 510 L 827 510" class="arrow"/>
+  <text x="668" y="502" class="step">4. daemon replays subcommand</text>
+
+  <path d="M 827 560 L 1047 560" class="arrow"/>
+  <text x="875" y="552" class="step">5. connect_backend()</text>
+
+  <path d="M 1047 610 L 1267 610" class="arrow"/>
+  <text x="1089" y="602" class="step">6. resolve platform and create backend</text>
+
+  <path d="M 827 650 L 1487 650" class="arrow"/>
+  <text x="1030" y="642" class="step">7. optional hierarchy/xpath service call</text>
+
+  <path d="M 1267 700 L 1647 700" class="arrow"/>
+  <text x="1385" y="692" class="step">8. backend issues driver / shell action</text>
+
+  <path d="M 1647 750 L 1267 750" class="return-arrow"/>
+  <text x="1410" y="742" class="step">9. raw result</text>
+
+  <path d="M 1267 790 L 827 790" class="return-arrow"/>
+  <text x="1045" y="782" class="step">10. command builds result + u2_code</text>
+
+  <path d="M 827 840 L 607 840" class="return-arrow"/>
+  <text x="675" y="832" class="step">11. daemon captures stdout/stderr</text>
+
+  <path d="M 607 890 L 387 890" class="return-arrow"/>
+  <text x="450" y="882" class="step">12. send JSON payload back</text>
+
+  <path d="M 387 940 L 167 940" class="return-arrow"/>
+  <text x="235" y="932" class="step">13. print output to caller</text>
+
+  <rect x="120" y="720" width="1400" height="140" class="band-direct"/>
+  <text x="145" y="750" class="note-title">Path B: direct execution with --no-daemon or repl</text>
+  <text x="145" y="771" class="note-text">`cli.py` skips `run_via_daemon()`. The selected command module calls `device.py` in the same process, then continues through the same backend and service layers.</text>
+
+  <path d="M 387 810 L 827 810" class="arrow"/>
+  <text x="520" y="802" class="step">direct jump to command module</text>
+
+  <rect x="120" y="885" width="1400" height="110" class="band-platform"/>
+  <text x="145" y="915" class="note-title">Platform branch after backend creation</text>
+  <text x="145" y="936" class="note-text">Android uses `adbutils` + `uiautomator2`; Harmony uses `hdc` + `hmdriver2`, plus extra transport guards and hierarchy-assisted fallbacks where native selectors are not enough.</text>
+
+  <path d="M 1267 970 L 1487 970" class="arrow"/>
+  <text x="1322" y="962" class="step">services ask backend for XML, selectors, drag, zoom</text>
+
+  <path d="M 1487 1010 L 1647 1010" class="arrow"/>
+  <text x="1510" y="1002" class="step">Android: adb/uiautomator2 or Harmony: hdc/hmdriver2</text>
+
+  <rect x="72" y="250" width="270" height="150" class="note-box"/>
+  <text x="95" y="280" class="note-title">What `cli.py` decides</text>
+  <text x="95" y="304" class="note-text">- parse `--serial`, `--platform`, `--json`, `--no-daemon`</text>
+  <text x="95" y="326" class="note-text">- refuse delegation for `daemon` and `repl`</text>
+  <text x="95" y="348" class="note-text">- otherwise route through daemon by default</text>
+  <text x="95" y="370" class="note-text">- preserve same argv for replay</text>
+
+  <rect x="942" y="260" width="300" height="150" class="note-box"/>
+  <text x="965" y="290" class="note-title">What `device.py` does</text>
+  <text x="965" y="314" class="note-text">- resolve serial from CLI context</text>
+  <text x="965" y="336" class="note-text">- cache backends by `platform:serial`</text>
+  <text x="965" y="358" class="note-text">- keep sticky default Android device</text>
+  <text x="965" y="380" class="note-text">- retry transient Harmony connect failures</text>
+
+  <rect x="1335" y="270" width="265" height="150" class="note-box"/>
+  <text x="1358" y="300" class="note-title">When services are used</text>
+  <text x="1358" y="324" class="note-text">- selector promotion on Harmony</text>
+  <text x="1358" y="346" class="note-text">- hierarchy dump simplification</text>
+  <text x="1358" y="368" class="note-text">- XPath shorthand resolution</text>
+  <text x="1358" y="390" class="note-text">- coordinate fallback for drag/drop</text>
+
+  <rect x="72" y="1015" width="1540" height="64" class="note-box"/>
+  <text x="95" y="1042" class="note-title">Reading tip</text>
+  <text x="220" y="1042" class="note-text">The daemon layer changes process ownership and transport, but not the business command path. After a command module starts, both daemon and direct modes converge on the same backend contract.</text>
+</svg>

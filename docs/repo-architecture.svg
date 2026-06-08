@@ -1,0 +1,265 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1120" viewBox="0 0 1680 1120" role="img" aria-labelledby="title desc">
+  <title id="title">uiautomator2-cli repository architecture</title>
+  <desc id="desc">Architecture overview for the uiautomator2-cli repository, showing entry points, command modules, runtime coordination, services, backends, external drivers, and tests.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7fafc"/>
+      <stop offset="100%" stop-color="#edf2f7"/>
+    </linearGradient>
+    <linearGradient id="panelA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fffaf0"/>
+      <stop offset="100%" stop-color="#feebc8"/>
+    </linearGradient>
+    <linearGradient id="panelB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ebf8ff"/>
+      <stop offset="100%" stop-color="#bee3f8"/>
+    </linearGradient>
+    <linearGradient id="panelC" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0fff4"/>
+      <stop offset="100%" stop-color="#c6f6d5"/>
+    </linearGradient>
+    <linearGradient id="panelD" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#faf5ff"/>
+      <stop offset="100%" stop-color="#e9d8fd"/>
+    </linearGradient>
+    <linearGradient id="panelE" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff5f5"/>
+      <stop offset="100%" stop-color="#fed7d7"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#1a202c" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/>
+    </marker>
+    <marker id="arrowSoft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#718096"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif; fill: #1a202c; }
+      .title { font-size: 32px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #4a5568; }
+      .section-title { font-size: 22px; font-weight: 700; }
+      .node-title { font-size: 18px; font-weight: 700; }
+      .node-text { font-size: 14px; fill: #2d3748; }
+      .small { font-size: 12px; fill: #4a5568; }
+      .panel { stroke: #cbd5e0; stroke-width: 2; rx: 24; ry: 24; filter: url(#shadow); }
+      .node { fill: #ffffff; stroke: #a0aec0; stroke-width: 1.5; rx: 16; ry: 16; filter: url(#shadow); }
+      .arrow { stroke: #4a5568; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .arrow-soft { stroke: #718096; stroke-width: 2; fill: none; marker-end: url(#arrowSoft); }
+      .arrow-dashed { stroke: #718096; stroke-width: 2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrowSoft); }
+      .panel-note { font-size: 13px; fill: #4a5568; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1680" height="1120" fill="url(#bg)"/>
+
+  <text x="70" y="70" class="title">uiautomator2-cli Repository Architecture</text>
+  <text x="70" y="100" class="subtitle">CLI entry points feed command modules, which use shared device/runtime coordination to reach Android and Harmony backends.</text>
+
+  <rect x="50" y="140" width="260" height="340" class="panel" fill="url(#panelA)"/>
+  <text x="75" y="180" class="section-title">Entry Points</text>
+  <text x="75" y="205" class="panel-note">Packaging and executable surfaces</text>
+
+  <rect x="75" y="230" width="210" height="92" class="node"/>
+  <text x="95" y="262" class="node-title">pyproject.toml</text>
+  <text x="95" y="286" class="node-text">console_scripts:</text>
+  <text x="95" y="307" class="node-text">u2cli, u2cli-smoke</text>
+
+  <rect x="75" y="345" width="210" height="110" class="node"/>
+  <text x="95" y="377" class="node-title">src/u2cli/cli.py</text>
+  <text x="95" y="401" class="node-text">Click root group</text>
+  <text x="95" y="422" class="node-text">global flags: serial, platform,</text>
+  <text x="95" y="443" class="node-text">json, no-daemon</text>
+
+  <rect x="75" y="495" width="210" height="110" class="node"/>
+  <text x="95" y="527" class="node-title">src/u2cli/smoke.py</text>
+  <text x="95" y="551" class="node-text">real-device smoke runner</text>
+  <text x="95" y="572" class="node-text">device_info, screenshot,</text>
+  <text x="95" y="593" class="node-text">current_app, playback_info</text>
+
+  <rect x="350" y="140" width="450" height="540" class="panel" fill="url(#panelB)"/>
+  <text x="375" y="180" class="section-title">Command Surface</text>
+  <text x="375" y="205" class="panel-note">Top-level CLI groups delegate to focused command modules</text>
+
+  <rect x="380" y="230" width="180" height="130" class="node"/>
+  <text x="400" y="262" class="node-title">screen.py</text>
+  <text x="400" y="286" class="node-text">device info, screenshot,</text>
+  <text x="400" y="307" class="node-text">swipe, drag, zoom,</text>
+  <text x="400" y="328" class="node-text">shell, current_app</text>
+
+  <rect x="590" y="230" width="180" height="130" class="node"/>
+  <text x="610" y="262" class="node-title">element.py</text>
+  <text x="610" y="286" class="node-text">selector-based actions</text>
+  <text x="610" y="307" class="node-text">click, text, exists,</text>
+  <text x="610" y="328" class="node-text">drag, scroll, wait</text>
+
+  <rect x="380" y="390" width="180" height="130" class="node"/>
+  <text x="400" y="422" class="node-title">app.py</text>
+  <text x="400" y="446" class="node-text">app start/stop/clear</text>
+  <text x="400" y="467" class="node-text">install, uninstall,</text>
+  <text x="400" y="488" class="node-text">list, info, wait</text>
+
+  <rect x="590" y="390" width="180" height="130" class="node"/>
+  <text x="610" y="422" class="node-title">daemon.py</text>
+  <text x="610" y="446" class="node-text">daemon start/stop/status</text>
+  <text x="610" y="467" class="node-text">socket, pid, log files</text>
+  <text x="610" y="488" class="node-text">per platform + serial</text>
+
+  <rect x="450" y="555" width="250" height="95" class="node"/>
+  <text x="470" y="587" class="node-title">output contract</text>
+  <text x="470" y="611" class="node-text">commands emit result payloads</text>
+  <text x="470" y="632" class="node-text">plus equivalent u2_code strings</text>
+
+  <rect x="840" y="140" width="350" height="540" class="panel" fill="url(#panelC)"/>
+  <text x="865" y="180" class="section-title">Runtime Coordination</text>
+  <text x="865" y="205" class="panel-note">Shared connection, caching, and command delegation</text>
+
+  <rect x="870" y="230" width="290" height="150" class="node"/>
+  <text x="890" y="262" class="node-title">device.py</text>
+  <text x="890" y="286" class="node-text">connect_backend()</text>
+  <text x="890" y="307" class="node-text">cache key = platform + serial</text>
+  <text x="890" y="328" class="node-text">sticky Android default device</text>
+  <text x="890" y="349" class="node-text">Harmony retry / stale backend guards</text>
+
+  <rect x="870" y="410" width="290" height="125" class="node"/>
+  <text x="890" y="442" class="node-title">backends/factory.py</text>
+  <text x="890" y="466" class="node-text">resolve_platform()</text>
+  <text x="890" y="487" class="node-text">create_backend()</text>
+  <text x="890" y="508" class="node-text">AndroidU2Backend or HarmonyHmBackend</text>
+
+  <rect x="870" y="560" width="290" height="92" class="node"/>
+  <text x="890" y="592" class="node-title">backends/base.py</text>
+  <text x="890" y="616" class="node-text">AutomationBackend protocol</text>
+  <text x="890" y="637" class="node-text">ElementHandle and LocatorHandle</text>
+
+  <rect x="1225" y="140" width="405" height="690" class="panel" fill="url(#panelD)"/>
+  <text x="1250" y="180" class="section-title">Backends and Services</text>
+  <text x="1250" y="205" class="panel-note">Cross-platform API surface with Harmony-specific transport glue</text>
+
+  <rect x="1255" y="230" width="165" height="130" class="node"/>
+  <text x="1275" y="262" class="node-title">android_u2.py</text>
+  <text x="1275" y="286" class="node-text">AndroidU2Backend</text>
+  <text x="1275" y="307" class="node-text">wraps uiautomator2</text>
+  <text x="1275" y="328" class="node-text">native selectors and actions</text>
+
+  <rect x="1445" y="230" width="155" height="130" class="node"/>
+  <text x="1465" y="262" class="node-title">harmony_hm.py</text>
+  <text x="1465" y="286" class="node-text">HarmonyHmBackend</text>
+  <text x="1465" y="307" class="node-text">current_app, zoom,</text>
+  <text x="1465" y="328" class="node-text">drag, media control</text>
+
+  <rect x="1255" y="390" width="165" height="145" class="node"/>
+  <text x="1275" y="422" class="node-title">services/hierarchy.py</text>
+  <text x="1275" y="446" class="node-text">capture XML hierarchy</text>
+  <text x="1275" y="467" class="node-text">normalize UiNode / UiBounds</text>
+  <text x="1275" y="488" class="node-text">flatten and render text tree</text>
+  <text x="1275" y="509" class="node-text">shared by commands and XPath</text>
+
+  <rect x="1445" y="390" width="155" height="145" class="node"/>
+  <text x="1465" y="422" class="node-title">services/xpath.py</text>
+  <text x="1465" y="446" class="node-text">XPath shorthand parser</text>
+  <text x="1465" y="467" class="node-text">query hierarchy snapshots</text>
+  <text x="1465" y="488" class="node-text">resolve locators and drag</text>
+  <text x="1465" y="509" class="node-text">through backend contract</text>
+
+  <rect x="1347" y="565" width="160" height="112" class="node"/>
+  <text x="1367" y="597" class="node-title">transports/hdc.py</text>
+  <text x="1367" y="621" class="node-text">find targets, run hdc shell,</text>
+  <text x="1367" y="642" class="node-text">guard hmdriver2 client state</text>
+
+  <rect x="1225" y="860" width="405" height="205" class="panel" fill="url(#panelE)"/>
+  <text x="1250" y="900" class="section-title">External Drivers and Tests</text>
+  <text x="1250" y="925" class="panel-note">Adapters on the right, regression coverage at the bottom</text>
+
+  <rect x="1255" y="950" width="150" height="80" class="node"/>
+  <text x="1275" y="982" class="node-title">Android stack</text>
+  <text x="1275" y="1006" class="node-text">adbutils</text>
+  <text x="1275" y="1027" class="node-text">uiautomator2</text>
+
+  <rect x="1430" y="950" width="170" height="80" class="node"/>
+  <text x="1450" y="982" class="node-title">Harmony stack</text>
+  <text x="1450" y="1006" class="node-text">hdc executable</text>
+  <text x="1450" y="1027" class="node-text">hmdriver2</text>
+
+  <rect x="50" y="730" width="1140" height="335" class="panel" fill="#ffffff"/>
+  <text x="75" y="770" class="section-title">Tests and Validation Surface</text>
+  <text x="75" y="795" class="panel-note">Focused test modules map directly onto the architecture slices they protect</text>
+
+  <rect x="80" y="825" width="200" height="90" class="node"/>
+  <text x="100" y="857" class="node-title">tests/test_daemon.py</text>
+  <text x="100" y="881" class="node-text">daemon lifecycle, status,</text>
+  <text x="100" y="902" class="node-text">request routing</text>
+
+  <rect x="305" y="825" width="200" height="90" class="node"/>
+  <text x="325" y="857" class="node-title">tests/test_device.py</text>
+  <text x="325" y="881" class="node-text">backend caching, retries,</text>
+  <text x="325" y="902" class="node-text">serial resolution</text>
+
+  <rect x="530" y="825" width="220" height="90" class="node"/>
+  <text x="550" y="857" class="node-title">tests/test_android_backend.py</text>
+  <text x="550" y="881" class="node-text">Android backend contract</text>
+  <text x="550" y="902" class="node-text">behavior and translation</text>
+
+  <rect x="775" y="825" width="225" height="90" class="node"/>
+  <text x="795" y="857" class="node-title">tests/test_harmony_backend.py</text>
+  <text x="795" y="881" class="node-text">Harmony backend behavior,</text>
+  <text x="795" y="902" class="node-text">transport fallbacks, current_app</text>
+
+  <rect x="80" y="940" width="250" height="90" class="node"/>
+  <text x="100" y="972" class="node-title">tests/test_command_migrations.py</text>
+  <text x="100" y="996" class="node-text">selector and XPath command</text>
+  <text x="100" y="1017" class="node-text">compatibility paths</text>
+
+  <rect x="355" y="940" width="220" height="90" class="node"/>
+  <text x="375" y="972" class="node-title">tests/test_hdc_transport.py</text>
+  <text x="375" y="996" class="node-text">HDC bootstrap and</text>
+  <text x="375" y="1017" class="node-text">driver state guards</text>
+
+  <rect x="600" y="940" width="170" height="90" class="node"/>
+  <text x="620" y="972" class="node-title">tests/test_smoke.py</text>
+  <text x="620" y="996" class="node-text">smoke CLI payload and</text>
+  <text x="620" y="1017" class="node-text">step orchestration</text>
+
+  <path d="M 285 278 L 285 278 L 380 278" class="arrow"/>
+  <path d="M 285 400 L 350 400 L 350 295 L 380 295" class="arrow"/>
+  <path d="M 285 550 L 350 550 L 350 610 L 450 610" class="arrow"/>
+
+  <path d="M 560 295 L 870 295" class="arrow"/>
+  <path d="M 770 295 L 870 295" class="arrow"/>
+  <path d="M 560 455 L 870 455" class="arrow"/>
+  <path d="M 770 455 L 870 455" class="arrow-dashed"/>
+  <path d="M 610 360 L 610 420 L 1255 420" class="arrow-soft"/>
+  <path d="M 680 360 L 680 480 L 1445 480" class="arrow-soft"/>
+  <path d="M 610 520 L 610 610 L 450 610" class="arrow-soft"/>
+
+  <path d="M 1015 380 L 1015 410" class="arrow"/>
+  <path d="M 1015 535 L 1015 560" class="arrow"/>
+  <path d="M 1160 472 L 1255 295" class="arrow"/>
+  <path d="M 1160 472 L 1445 295" class="arrow"/>
+  <path d="M 1160 606 L 1255 462" class="arrow-soft"/>
+  <path d="M 1160 606 L 1445 462" class="arrow-soft"/>
+
+  <path d="M 1600 295 L 1600 990 L 1430 990" class="arrow"/>
+  <path d="M 1340 295 L 1340 990 L 1405 990" class="arrow"/>
+  <path d="M 1522 360 L 1522 565" class="arrow"/>
+  <path d="M 1507 677 L 1515 950" class="arrow"/>
+  <path d="M 1340 677 L 1330 950" class="arrow"/>
+
+  <path d="M 180 915 L 180 940 L 180 940" class="arrow-dashed"/>
+  <path d="M 180 825 L 650 520" class="arrow-dashed"/>
+  <path d="M 405 825 L 965 380" class="arrow-dashed"/>
+  <path d="M 640 825 L 1337 360" class="arrow-dashed"/>
+  <path d="M 887 825 L 1522 360" class="arrow-dashed"/>
+  <path d="M 465 940 L 1425 677" class="arrow-dashed"/>
+  <path d="M 685 940 L 160 550" class="arrow-dashed"/>
+
+  <text x="302" y="392" class="small">registers commands</text>
+  <text x="298" y="543" class="small">alternate entry point</text>
+  <text x="777" y="286" class="small">normal commands</text>
+  <text x="777" y="447" class="small">daemon management</text>
+  <text x="1040" y="472" class="small">backend selection</text>
+  <text x="1195" y="592" class="small">protocol used by services</text>
+  <text x="1530" y="555" class="small">Harmony bootstrap glue</text>
+  <text x="100" y="1060" class="subtitle">Key idea: command modules stay thin; cross-platform behavior lives in shared services and backend adapters.</text>
+</svg>

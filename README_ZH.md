@@ -102,6 +102,11 @@ u2cli --platform harmony get-text --package com.demo.app --text-starts-with "Wel
 u2cli --platform harmony exists --package com.demo.app --text-contains "Login"
 ```
 
+## 架构图
+
+- 仓库代码架构总览：[docs/repo-architecture.svg](docs/repo-architecture.svg)
+- 命令执行时序图：[docs/command-execution-sequence.svg](docs/command-execution-sequence.svg)
+
 ## Daemon 设计（新版）
 
 `u2cli` 现在是 daemon-first 设计。

@@ -102,6 +102,11 @@ u2cli --platform harmony get-text --package com.demo.app --text-starts-with "Wel
 u2cli --platform harmony exists --package com.demo.app --text-contains "Login"
 ```
 
+## Architecture
+
+- Repository architecture overview: [docs/repo-architecture.svg](docs/repo-architecture.svg)
+- Command execution sequence: [docs/command-execution-sequence.svg](docs/command-execution-sequence.svg)
+
 ## Daemon-First Design
 
 `u2cli` routes normal commands through a background daemon.
